@@ -6,6 +6,8 @@ public sealed class Recommendation
 {
     public string Title { get; init; } = "";
     public string Reason { get; init; } = "";
+    /// <summary>The game setting behind this advice; null for generic advice.</summary>
+    public GameSetting? Setting { get; init; }
 }
 
 /// <summary>What the player wants to preserve when trading quality for FPS.</summary>
@@ -56,6 +58,7 @@ public static class RecommendationEngine
             {
                 Title = $"{game.Name}: lower \"{setting.Name}\" by one step",
                 Reason = $"Typical gain {setting.PerformanceGain}/5 for a visual cost of {setting.QualityLoss}/5.",
+                Setting = setting,
             };
         }
     }

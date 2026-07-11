@@ -6,8 +6,14 @@
   ],
   "settings": [
     { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
-    { "name": "NVIDIA HairWorks", "impact": "gpu", "qualityLoss": 1, "performanceGain": 4 },
-    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
+    {
+      "name": "NVIDIA HairWorks", "impact": "gpu", "qualityLoss": 1, "performanceGain": 4,
+      "config": { "file": "user.settings", "section": "Rendering", "key": "HairWorksLevel", "levels": ["0", "1", "2"] }
+    },
+    {
+      "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3,
+      "config": { "file": "user.settings", "section": "Rendering", "key": "ShadowQuality", "levels": ["0", "1", "2", "3", "4"] }
+    },
     { "name": "Foliage Visibility Range", "impact": "mixed", "qualityLoss": 2, "performanceGain": 3 },
     { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
     { "name": "Number of Background Characters", "impact": "cpu", "qualityLoss": 1, "performanceGain": 2 }

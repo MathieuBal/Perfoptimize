@@ -14,6 +14,7 @@ de réglages graphiques.
 - ✅ **Étape 6 — objectifs utilisateur** (qualité / équilibré / performances)
 - ✅ **Étape 7 — historique des sessions** (base SQLite locale)
 - ✅ **Étape 8 — fichiers de configuration** (localisation, sauvegarde, restauration)
+- ✅ **Étape 9 — application des réglages** (prévisualisation par défaut, `--write` explicite)
 
 ### Étape 1 : détection matérielle
 
@@ -40,6 +41,8 @@ dotnet run --project src/Perfoptimize.Cli -- history           # dernières sess
 dotnet run --project src/Perfoptimize.Cli -- config witcher              # localiser les fichiers de config
 dotnet run --project src/Perfoptimize.Cli -- config witcher --backup     # sauvegarde horodatée
 dotnet run --project src/Perfoptimize.Cli -- config witcher --restore    # restaurer (jeu fermé uniquement)
+dotnet run --project src/Perfoptimize.Cli -- apply witcher               # prévisualiser les modifications
+dotnet run --project src/Perfoptimize.Cli -- apply witcher --bottleneck gpu --write   # appliquer
 ```
 
 Exemple de session `monitor` :
@@ -142,6 +145,26 @@ et leur format (INI, JSON, XML). Règles de sécurité, dans cet ordre :
 3. l'éditeur INI ne touche que la ligne visée et préserve commentaires,
    ordre et espacement, car certains lanceurs valident leurs propres fichiers.
 
+### Application des réglages
+
+`apply <jeu>` traduit les recommandations en modifications concrètes des
+fichiers de configuration. Les réglages liés déclarent dans le profil leur clé
+et leur **échelle de valeurs** ordonnée de la plus basse à la plus haute
+qualité (`"levels": ["0","1","2","3","4"]`) — « baisser d'un cran » = un pas
+vers la gauche, ce qui gère aussi les échelles inversées comme
+`TextureDownscale` où 0 est la meilleure qualité.
+
+Sécurité avant tout :
+
+- **dry run par défaut** : sans `--write`, rien n'est modifié, le plan est
+  seulement affiché ;
+- toute valeur actuelle hors de l'échelle documentée est **laissée intacte**
+  (une mauvaise écriture est pire qu'une optimisation manquée) ;
+- `--write` exige le jeu fermé, sauvegarde chaque fichier avant modification,
+  et `config <jeu> --restore` ramène l'état précédent ;
+- le goulot ciblé vient de la dernière session `monitor` enregistrée pour ce
+  jeu, ou de `--bottleneck` explicite.
+
 ### Profils de jeux
 
 Chaque jeu connu est décrit par un JSON embarqué
@@ -177,10 +200,12 @@ src/
 │   ├── Optimization/               # étapes 4 et 6 : analyse, objectifs, recommandations
 │   │   ├── BottleneckDetector.cs
 │   │   └── RecommendationEngine.cs
-│   ├── Configs/                    # étape 8 : fichiers de config (INI, chemins, backups)
+│   ├── Configs/                    # étapes 8-9 : fichiers de config et application
 │   │   ├── IniFile.cs
 │   │   ├── ConfigPathResolver.cs
-│   │   └── ConfigBackupService.cs
+│   │   ├── ConfigBackupService.cs
+│   │   ├── SettingsPlanner.cs      # planification pure des modifications
+│   │   └── SettingsApplier.cs      # backup + écriture
 │   ├── Storage/                    # étape 7 : historique SQLite des sessions
 │   │   └── SessionStore.cs
 │   └── Formatting/
@@ -199,6 +224,5 @@ dotnet test Perfoptimize.sln
 ### Prochaines étapes
 
 1. Capture PresentMon pilotée automatiquement pendant `monitor` (Windows) ;
-2. Application des réglages recommandés dans les fichiers de config
-   (jeu fermé, après sauvegarde — les fondations sont en place) ;
+2. Étendre les liaisons de config (plus de jeux, formats JSON/XML) ;
 3. Interface graphique (WPF/WinUI).

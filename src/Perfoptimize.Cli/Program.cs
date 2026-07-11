@@ -22,6 +22,11 @@ using Perfoptimize.Core.Storage;
 //   perfoptimize config <game>       Locate a game's config files.
 //     --backup                       Back them up (timestamped copies).
 //     --restore                      Restore the most recent backup (game must be closed).
+//   perfoptimize apply <game>        Preview the config edits implementing the
+//                                    recommendations (dry run by default).
+//     --bottleneck gpu|cpu|...       Bottleneck to optimize for (default: last session's).
+//     --goal quality|balanced|performance
+//     --write                        Actually write the files (backup first, game closed).
 
 var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "scan";
 
@@ -35,7 +40,8 @@ try
         "frametimes" => RunFrametimes(args),
         "history" => RunHistory(args),
         "config" => RunConfig(args),
-        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history, config."),
+        "apply" => RunApply(args),
+        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history, config, apply."),
     };
 }
 catch (PlatformNotSupportedException ex)
@@ -316,6 +322,89 @@ static int RunConfig(string[] args)
         }
     }
     return failures == 0 ? 0 : 1;
+}
+
+static int RunApply(string[] args)
+{
+    var query = args.SkipWhile(a => a != "apply").Skip(1)
+        .FirstOrDefault(a => !a.StartsWith('-'));
+    if (query is null)
+        return Fail("Usage: perfoptimize apply <game> [--bottleneck gpu|cpu|vram|ram|thermal] " +
+                    "[--goal quality|balanced|performance] [--write]");
+
+    var profiles = GameProfileRepository.LoadBuiltIn();
+    var game = profiles.FirstOrDefault(p =>
+                   p.Name.Contains(query, StringComparison.OrdinalIgnoreCase)) ??
+               RunningGameDetector.Match(query, profiles);
+    if (game is null)
+        return Fail($"No known game matches \"{query}\". See \"perfoptimize games\".");
+
+    var goal = OptimizationGoal.Balanced;
+    var goalIndex = Array.IndexOf(args, "--goal");
+    if (goalIndex >= 0 && goalIndex + 1 < args.Length &&
+        !Enum.TryParse(args[goalIndex + 1], ignoreCase: true, out goal))
+        return Fail($"Unknown goal \"{args[goalIndex + 1]}\". Available: quality, balanced, performance.");
+
+    // The bottleneck to optimize for: explicit flag, or the last recorded session for this game.
+    BottleneckType bottleneck;
+    var bottleneckIndex = Array.IndexOf(args, "--bottleneck");
+    if (bottleneckIndex >= 0)
+    {
+        if (bottleneckIndex + 1 >= args.Length ||
+            !Enum.TryParse(args[bottleneckIndex + 1], ignoreCase: true, out bottleneck))
+            return Fail("Usage: --bottleneck gpu|cpu|vram|ram|thermal");
+    }
+    else
+    {
+        using var store = new SessionStore(SessionStore.DefaultDatabasePath());
+        var lastSession = store.GetRecent(limit: 1, game.Name).FirstOrDefault();
+        if (lastSession is null)
+            return Fail($"No recorded session for {game.Name}. Run \"perfoptimize monitor\" while " +
+                        "playing first, or pass --bottleneck explicitly.");
+        bottleneck = lastSession.Bottleneck;
+        Console.WriteLine($"Using the bottleneck of session #{lastSession.Id} " +
+                          $"({lastSession.StartedAt:yyyy-MM-dd HH:mm}): {bottleneck}");
+    }
+
+    var write = args.Contains("--write");
+    if (write && new RunningGameDetector().Detect([game]) is { } running)
+        return Fail($"{game.Name} is running (pid {running.ProcessId}) — close it before writing its config.");
+
+    var recommendations = RecommendationEngine.Recommend(
+        new BottleneckAnalysis { Type = bottleneck }, game, goal);
+    var settingsToLower = recommendations
+        .Where(r => r.Setting is not null)
+        .Select(r => r.Setting!)
+        .ToList();
+    if (settingsToLower.Count == 0)
+        return Fail($"No {game.Name} setting targets a {bottleneck} bottleneck.");
+
+    var applier = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
+    var result = applier.Apply(game, settingsToLower, write);
+
+    Console.WriteLine();
+    Console.WriteLine(result.Written
+        ? $"Applied config changes for {game.Name} ({goal} goal, {bottleneck} bottleneck):"
+        : $"Planned config changes for {game.Name} ({goal} goal, {bottleneck} bottleneck) — dry run:");
+    foreach (var change in result.Changes)
+    {
+        var marker = change.Status == PlannedChangeStatus.Ready ? (result.Written ? "APPLIED" : "READY") : change.Status.ToString();
+        Console.WriteLine($"- {change.Setting.Name} [{marker}]");
+        Console.WriteLine($"    {change.Note}");
+    }
+
+    if (result.Written)
+    {
+        foreach (var backup in result.BackupPaths)
+            Console.WriteLine($"Backup created: {backup}");
+        Console.WriteLine("Restore anytime with \"perfoptimize config <game> --restore\".");
+    }
+    else if (result.Changes.Any(c => c.Status == PlannedChangeStatus.Ready))
+    {
+        Console.WriteLine();
+        Console.WriteLine("Nothing was written. Re-run with --write to apply (a backup is taken first).");
+    }
+    return 0;
 }
 
 static string Percent(double? value) => value is { } v ? $"{v:0}%" : "n/a";
