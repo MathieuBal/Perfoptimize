@@ -540,6 +540,35 @@ public static class RecommendationEngine
                 };
                 break;
 
+            case BottleneckType.ExternalCpuLoad:
+                yield return new Recommendation
+                {
+                    Title = "Identify and close (or pause) the CPU-hungry background process",
+                    Reason = "The saturated CPU load does not belong to the game — antivirus scans, " +
+                             "indexers, updaters and background renders are the usual culprits. " +
+                             "No game setting will fix this.",
+                };
+                yield return new Recommendation
+                {
+                    Title = "Re-run the analysis once the background load is gone",
+                    Reason = "The real bottleneck can only be identified on a quiet machine.",
+                };
+                break;
+
+            case BottleneckType.GpuHardwareLimit:
+                yield return new Recommendation
+                {
+                    Title = "Check GPU power cables, power limit and cooling",
+                    Reason = "The driver reports a hardware slowdown (HW slowdown / power brake): the " +
+                             "card is held back by a board or power limit, not by your settings.",
+                };
+                yield return new Recommendation
+                {
+                    Title = "Cap the frame rate while investigating",
+                    Reason = "Reduces the sustained load that trips the limit, without touching quality.",
+                };
+                break;
+
             case BottleneckType.Cpu:
                 yield return new Recommendation
                 {

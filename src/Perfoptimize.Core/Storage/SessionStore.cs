@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Monitoring;
 using Perfoptimize.Core.Optimization;
 using System.Text.Json;
@@ -7,7 +8,9 @@ using System.Text.Json.Serialization;
 namespace Perfoptimize.Core.Storage;
 
 /// <summary>One recommendation captured with the session, so 'apply' can later
-/// execute exactly the plan the user saw during monitoring.</summary>
+/// execute exactly the plan the user saw during monitoring. When the setting is
+/// bound to a config file, the exact edit (file, section, key, observed and
+/// proposed values) is snapshotted — the display name is UI, not the identifier.</summary>
 public sealed class StoredRecommendation
 {
     public string Title { get; init; } = "";
@@ -15,6 +18,38 @@ public sealed class StoredRecommendation
     /// <summary>Name of the game setting behind the advice; null for generic advice.</summary>
     public string? SettingName { get; init; }
     public double? ExpectedGainPercent { get; init; }
+
+    /// <summary>Config file (profile-relative name) of the planned edit; null when unbound.</summary>
+    public string? ConfigFile { get; init; }
+    public string? ConfigSection { get; init; }
+    public string? ConfigKey { get; init; }
+    /// <summary>Value observed in the config at monitoring time.</summary>
+    public string? ObservedValue { get; init; }
+    /// <summary>Value the plan proposed to write.</summary>
+    public string? ProposedValue { get; init; }
+
+    /// <summary>
+    /// Rebuilds the exact planned edit as a synthetic setting whose ladder is
+    /// [proposed, observed]: "lower by one step" from the observed value yields
+    /// precisely the proposed value, and any other current value is refused as
+    /// out-of-ladder — the config changed since the session, so nothing is touched.
+    /// </summary>
+    public GameSetting? ToExactSetting()
+    {
+        if (ConfigFile is null || ConfigKey is null || ObservedValue is null || ProposedValue is null)
+            return null;
+        return new GameSetting
+        {
+            Name = SettingName ?? Title,
+            Config = new SettingBinding
+            {
+                File = ConfigFile,
+                Section = ConfigSection ?? "",
+                Key = ConfigKey,
+                Levels = [ProposedValue, ObservedValue],
+            },
+        };
+    }
 }
 
 /// <summary>One stored monitoring session.</summary>

@@ -63,7 +63,7 @@ public class GpuAttributionDiagnosisTests
 public class SingleThreadAttributionTests
 {
     [Fact]
-    public void Pinned_core_with_idle_game_process_blames_another_program()
+    public void Pinned_core_with_idle_game_process_is_external_cpu_load()
     {
         // A core is saturated but the game barely uses CPU: antivirus, indexer...
         var analysis = BottleneckDetector.Analyze(new PerformanceSummary
@@ -75,9 +75,68 @@ public class SingleThreadAttributionTests
             AverageGpuUsagePercent = 50,
         }, logicalCores: 8);
 
-        Assert.Equal(BottleneckType.Cpu, analysis.Type);
-        Assert.Equal(BottleneckConfidence.Suspected, analysis.Confidence);
+        Assert.Equal(BottleneckType.ExternalCpuLoad, analysis.Type);
         Assert.Contains("another program", analysis.Explanation);
+    }
+
+    [Fact]
+    public void Saturated_total_cpu_with_idle_game_is_external_cpu_load_too()
+    {
+        // Attribution must also apply to global saturation, not just one core.
+        var analysis = BottleneckDetector.Analyze(new PerformanceSummary
+        {
+            SampleCount = 30,
+            AverageCpuUsagePercent = 92,
+            AverageGameCpuUsagePercent = 15, // 15 < 92 * 0.4
+            AverageGpuUsagePercent = 50,
+        }, logicalCores: 8);
+
+        Assert.Equal(BottleneckType.ExternalCpuLoad, analysis.Type);
+    }
+
+    [Fact]
+    public void Saturated_total_cpu_mostly_from_the_game_stays_cpu_bound()
+    {
+        var analysis = BottleneckDetector.Analyze(new PerformanceSummary
+        {
+            SampleCount = 30,
+            AverageCpuUsagePercent = 92,
+            AverageGameCpuUsagePercent = 70,
+            AverageGpuUsagePercent = 50,
+        }, logicalCores: 8);
+
+        Assert.Equal(BottleneckType.Cpu, analysis.Type);
+        Assert.Equal(BottleneckConfidence.Confirmed, analysis.Confidence);
+    }
+
+    [Fact]
+    public void External_verdicts_never_recommend_touching_game_settings()
+    {
+        foreach (var type in new[]
+                 {
+                     BottleneckType.ExternalCpuLoad,
+                     BottleneckType.ExternalGpuLoad,
+                     BottleneckType.GpuHardwareLimit,
+                 })
+        {
+            var recommendations = RecommendationEngine.Recommend(
+                new BottleneckAnalysis { Type = type },
+                new Perfoptimize.Core.Games.GameProfile
+                {
+                    Name = "Any Game",
+                    Executables = ["any.exe"],
+                    Upscalers = ["dlss", "dlss-fg"],
+                    Settings =
+                    [
+                        new() { Name = "Shadows", Impact = Perfoptimize.Core.Games.SettingImpact.Gpu, QualityLoss = 2, PerformanceGain = 3 },
+                        new() { Name = "Crowds", Impact = Perfoptimize.Core.Games.SettingImpact.Cpu, QualityLoss = 2, PerformanceGain = 3 },
+                    ],
+                });
+
+            Assert.NotEmpty(recommendations);
+            Assert.All(recommendations, r => Assert.Null(r.Setting));
+            Assert.DoesNotContain(recommendations, r => r.Title.Contains("Frame Generation"));
+        }
     }
 
     [Fact]
@@ -110,7 +169,7 @@ public class ThrottleCauseSeparationTests
     }
 
     [Fact]
-    public void Hardware_slowdown_yields_a_suspected_verdict_mentioning_power()
+    public void Hardware_slowdown_is_its_own_verdict_not_thermal()
     {
         var analysis = BottleneckDetector.Analyze(new PerformanceSummary
         {
@@ -118,8 +177,7 @@ public class ThrottleCauseSeparationTests
             GpuHardwareSlowdownObserved = true,
         });
 
-        Assert.Equal(BottleneckType.Thermal, analysis.Type);
-        Assert.Equal(BottleneckConfidence.Suspected, analysis.Confidence);
+        Assert.Equal(BottleneckType.GpuHardwareLimit, analysis.Type);
         Assert.Contains("power", analysis.Explanation, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirmed throttling", analysis.Explanation);
     }

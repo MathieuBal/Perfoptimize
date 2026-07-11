@@ -8,9 +8,16 @@ public enum BottleneckType
     Unknown,
     None,
     Cpu,
+    /// <summary>A CPU core (or the CPU) is saturated, but by processes other than the game.</summary>
+    ExternalCpuLoad,
     Gpu,
     /// <summary>The GPU is saturated, but mostly by processes other than the game.</summary>
     ExternalGpuLoad,
+    /// <summary>
+    /// The GPU driver reports a non-thermal hardware slowdown (power brake,
+    /// HW slowdown) — a board/power limit, not a settings problem.
+    /// </summary>
+    GpuHardwareLimit,
     Ram,
     Vram,
     Thermal,
@@ -50,6 +57,8 @@ public static class BottleneckDetector
     private const double CpuBoundPercent = 85;
     private const double SingleCoreBoundPercent = 90;
     private const double GpuIdleWhileCpuBoundPercent = 80;
+    /// <summary>Below this share of the saturated total, the CPU load is not the game's.</summary>
+    private const double ExternalCpuGameShareRatio = 0.4;
 
     /// <param name="logicalCores">
     /// Logical core count of the machine, used to judge whether the game's CPU
@@ -131,17 +140,18 @@ public static class BottleneckDetector
         }
 
         // HW slowdown / power brake: real, but the cause may be power delivery
-        // rather than heat — never label it "thermal confirmed".
+        // rather than heat — a distinct verdict, so the advisor never treats it
+        // as a settings problem.
         if (summary.GpuHardwareSlowdownObserved)
         {
             return new BottleneckAnalysis
             {
-                Type = BottleneckType.Thermal,
-                Confidence = BottleneckConfidence.Suspected,
+                Type = BottleneckType.GpuHardwareLimit,
+                Confidence = BottleneckConfidence.Confirmed,
                 Explanation = "The GPU driver reported a hardware slowdown (HW slowdown or power brake). " +
-                              "The card is being held back, but the cause may be power delivery or a " +
-                              "board limit rather than temperature — check PSU cables and power limits " +
-                              "as well as cooling.",
+                              "The card is being held back by a board or power limit, not by your " +
+                              "settings — check PSU cables, power limits and cooling before changing " +
+                              "anything in the game.",
             };
         }
 
@@ -233,11 +243,33 @@ public static class BottleneckDetector
 
         if (summary.AverageCpuUsagePercent >= CpuBoundPercent)
         {
+            // Attribution applies to global saturation too: an antivirus scan or a
+            // background render can max several cores while the game sits idle.
+            if (summary.AverageGameCpuUsagePercent is { } gameOfTotal &&
+                summary.AverageCpuUsagePercent is { } totalCpu &&
+                gameOfTotal < totalCpu * ExternalCpuGameShareRatio)
+            {
+                return new BottleneckAnalysis
+                {
+                    Type = BottleneckType.ExternalCpuLoad,
+                    Confidence = BottleneckConfidence.Confirmed,
+                    Explanation = $"The CPU averaged {totalCpu:0}% but the game process only accounts " +
+                                  $"for {gameOfTotal:0}% of the machine — other programs are eating the " +
+                                  "CPU. Close or pause them; no game setting will fix this.",
+                };
+            }
+
             return new BottleneckAnalysis
             {
                 Type = BottleneckType.Cpu,
+                Confidence = summary.AverageGameCpuUsagePercent is null
+                    ? BottleneckConfidence.Suspected
+                    : BottleneckConfidence.Confirmed,
                 Explanation = $"The CPU averaged {summary.AverageCpuUsagePercent:0}% while the GPU had headroom — " +
-                              "simulation or draw-call load is the limiting factor.",
+                              "simulation or draw-call load is the limiting factor." +
+                              (summary.AverageGameCpuUsagePercent is null
+                                  ? " Per-process attribution was unavailable, so confirm the load belongs to the game."
+                                  : ""),
             };
         }
 
@@ -257,12 +289,12 @@ public static class BottleneckDetector
                 {
                     return new BottleneckAnalysis
                     {
-                        Type = BottleneckType.Cpu,
-                        Confidence = BottleneckConfidence.Suspected,
+                        Type = BottleneckType.ExternalCpuLoad,
+                        Confidence = BottleneckConfidence.Confirmed,
                         Explanation = $"One CPU core averaged {summary.AverageMaxCoreUsagePercent:0}%{total}, " +
                                       $"but the game process only uses ~{coresWorth:0.0} core's worth of CPU — " +
-                                      "the saturated core probably belongs to another program (antivirus scan, " +
-                                      "background task). Check running processes before changing game settings.",
+                                      "the saturated core belongs to another program (antivirus scan, " +
+                                      "background task). Close it; no game setting will fix this.",
                     };
                 }
             }

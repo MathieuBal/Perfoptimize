@@ -17,10 +17,21 @@ public sealed class TuneOutcome
     public string Verdict { get; init; } = "";
 }
 
+/// <summary>The keep-or-restore decision, separated from any file I/O so the
+/// two-phase workflow (prepare/finish) and simulations reuse the same rules.</summary>
+public sealed class TuneDecision
+{
+    public bool Keep { get; init; }
+    public double AverageFpsChangePercent { get; init; }
+    public double OnePercentLowChangePercent { get; init; }
+    public string Verdict { get; init; } = "";
+}
+
 /// <summary>
 /// The measured optimization loop: apply ONE change, re-measure in the same
 /// scene, and keep it only if the numbers actually improved on THIS machine.
-/// This is what turns declarative profile estimates into verified results.
+/// Any failure — including an exception during the second measurement — rolls
+/// the change back from the exact backup taken by this run.
 /// </summary>
 public sealed class OptimizationLoop
 {
@@ -29,15 +40,57 @@ public sealed class OptimizationLoop
     /// <summary>A 1% low improvement this large keeps a change even with flat averages.</summary>
     private const double KeepOnePercentLowThresholdPercent = 8;
     /// <summary>An average regression beyond this always rolls the change back.</summary>
-    private const double RegressionTolerancePercent = -1;
+    private const double AverageRegressionLimitPercent = -1;
+    /// <summary>A 1% low regression beyond this always rolls the change back,
+    /// even when the average improved — smoothness beats raw numbers.</summary>
+    private const double OnePercentLowRegressionLimitPercent = -5;
+    /// <summary>Maximum tolerated increase of the stutter share (percentage points).</summary>
+    private const double StutterIncreaseLimitPoints = 2;
 
     private readonly SettingsApplier _applier;
-    private readonly ConfigBackupService _backups;
 
-    public OptimizationLoop(SettingsApplier applier, ConfigBackupService backups)
+    public OptimizationLoop(SettingsApplier applier) => _applier = applier;
+
+    /// <summary>Pure keep-or-restore rule from two measurements.</summary>
+    public static TuneDecision Decide(FrametimeStatistics baseline, FrametimeStatistics after)
     {
-        _applier = applier;
-        _backups = backups;
+        var averageDelta = PercentChange(baseline.AverageFps, after.AverageFps);
+        var lowDelta = PercentChange(baseline.OnePercentLowFps, after.OnePercentLowFps);
+        var stutterDelta = after.StutterPercent - baseline.StutterPercent;
+
+        // A change that trades stutter for average FPS is a bad trade.
+        var severeRegression = averageDelta < AverageRegressionLimitPercent ||
+                               lowDelta < OnePercentLowRegressionLimitPercent ||
+                               stutterDelta > StutterIncreaseLimitPoints;
+        var keep = !severeRegression &&
+                   (averageDelta >= KeepAverageThresholdPercent ||
+                    lowDelta >= KeepOnePercentLowThresholdPercent);
+
+        string verdict;
+        if (keep)
+        {
+            verdict = $"Kept: average FPS {Format(averageDelta)}, 1% low {Format(lowDelta)} — " +
+                      "measured on this machine, not estimated.";
+        }
+        else if (severeRegression && averageDelta >= KeepAverageThresholdPercent)
+        {
+            verdict = $"Rolled back despite average FPS {Format(averageDelta)}: 1% low {Format(lowDelta)}, " +
+                      $"stutter {Format(stutterDelta)} pts — smoothness got worse, and stutter is felt " +
+                      "more than averages.";
+        }
+        else
+        {
+            verdict = $"Rolled back: average FPS {Format(averageDelta)}, 1% low {Format(lowDelta)} — " +
+                      "the measured benefit did not justify the visual cost.";
+        }
+
+        return new TuneDecision
+        {
+            Keep = keep,
+            AverageFpsChangePercent = Math.Round(averageDelta, 1),
+            OnePercentLowChangePercent = Math.Round(lowDelta, 1),
+            Verdict = verdict,
+        };
     }
 
     /// <summary>
@@ -46,11 +99,6 @@ public sealed class OptimizationLoop
     /// keeps or rolls back based on the numbers. Returns null when the setting
     /// could not be applied (no binding, value out of ladder, ...).
     /// </summary>
-    /// <param name="baseline">FPS statistics measured before any change.</param>
-    /// <param name="measureAfter">
-    /// Re-measures FPS after the change is in place — the caller is responsible
-    /// for the game being back in a comparable scene.
-    /// </param>
     public async Task<TuneOutcome?> RunOnceAsync(
         GameProfile game,
         GameSetting settingToLower,
@@ -62,51 +110,56 @@ public sealed class OptimizationLoop
         if (change is null || !applyResult.Written)
             return null;
 
-        var after = await measureAfter();
-        if (after is null)
+        var kept = false;
+        try
         {
-            // No usable second measurement: never keep an unverified change.
-            Restore(game, change);
+            // If measureAfter throws (missing file, cancellation, crash), the
+            // finally block restores before the exception reaches the caller:
+            // an unverifiable change never stays.
+            var after = await measureAfter();
+
+            if (after is null)
+            {
+                return new TuneOutcome
+                {
+                    Baseline = baseline,
+                    After = baseline,
+                    Change = change,
+                    Kept = false,
+                    Verdict = "The second measurement failed, so the change was rolled back — " +
+                              "a change that cannot be verified must not stay.",
+                };
+            }
+
+            var decision = Decide(baseline, after);
+            kept = decision.Keep;
             return new TuneOutcome
             {
                 Baseline = baseline,
-                After = baseline,
+                After = after,
                 Change = change,
-                Kept = false,
-                Verdict = "The second measurement failed, so the change was rolled back — " +
-                          "a change that cannot be verified must not stay.",
+                Kept = decision.Keep,
+                AverageFpsChangePercent = decision.AverageFpsChangePercent,
+                OnePercentLowChangePercent = decision.OnePercentLowChangePercent,
+                Verdict = decision.Verdict,
             };
         }
-
-        var averageDelta = PercentChange(baseline.AverageFps, after.AverageFps);
-        var lowDelta = PercentChange(baseline.OnePercentLowFps, after.OnePercentLowFps);
-
-        var keep = averageDelta >= KeepAverageThresholdPercent ||
-                   (averageDelta >= RegressionTolerancePercent &&
-                    lowDelta >= KeepOnePercentLowThresholdPercent);
-        if (!keep)
-            Restore(game, change);
-
-        return new TuneOutcome
+        finally
         {
-            Baseline = baseline,
-            After = after,
-            Change = change,
-            Kept = keep,
-            AverageFpsChangePercent = Math.Round(averageDelta, 1),
-            OnePercentLowChangePercent = Math.Round(lowDelta, 1),
-            Verdict = keep
-                ? $"Kept: average FPS {Format(averageDelta)}, 1% low {Format(lowDelta)} — " +
-                  "measured on this machine, not estimated."
-                : $"Rolled back: average FPS {Format(averageDelta)}, 1% low {Format(lowDelta)} — " +
-                  "the measured benefit did not justify the visual cost.",
-        };
+            if (!kept)
+                Restore(applyResult);
+        }
     }
 
-    private void Restore(GameProfile game, PlannedChange change)
+    /// <summary>Restores from the exact backups taken by this run — never
+    /// "the latest backup", which could belong to another operation.</summary>
+    private static void Restore(ApplyResult applyResult)
     {
-        if (change.FilePath is { } path)
-            _backups.RestoreLatest(game.Name, path);
+        foreach (var (path, backupPath) in applyResult.BackupByFile)
+        {
+            if (File.Exists(backupPath))
+                File.Copy(backupPath, path, overwrite: true);
+        }
     }
 
     private static double PercentChange(double before, double after) =>

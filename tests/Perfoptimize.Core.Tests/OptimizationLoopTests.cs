@@ -38,7 +38,7 @@ public class OptimizationLoopTests : IDisposable
     private OptimizationLoop Loop()
     {
         var backups = new ConfigBackupService(Path.Combine(_root, "backups"));
-        return new OptimizationLoop(new SettingsApplier(backups), backups);
+        return new OptimizationLoop(new SettingsApplier(backups));
     }
 
     private static FrametimeStatistics Fps(double average, double onePercentLow) => new()
@@ -113,6 +113,72 @@ public class OptimizationLoopTests : IDisposable
 
         Assert.Null(outcome);
         Assert.Contains("exotic", File.ReadAllText(_configPath));
+    }
+
+    [Fact]
+    public async Task Exception_during_the_second_measurement_still_rolls_back()
+    {
+        // "Unverifiable change never stays" must hold even when the measurement
+        // code throws instead of politely returning null.
+        await Assert.ThrowsAsync<IOException>(() => Loop().RunOnceAsync(
+            _game, _setting, Fps(48, 38),
+            () => throw new IOException("capture file vanished")));
+
+        Assert.Equal("3", IniFile.Parse(File.ReadAllText(_configPath))["Rendering"]["ShadowQuality"]);
+    }
+
+    [Fact]
+    public async Task Rollback_uses_this_runs_backup_not_the_latest_one()
+    {
+        var backups = new ConfigBackupService(Path.Combine(_root, "backups"));
+        var loop = new OptimizationLoop(new SettingsApplier(backups));
+
+        var outcome = await loop.RunOnceAsync(
+            _game, _setting, Fps(48, 38),
+            () =>
+            {
+                // A decoy backup taken between apply and rollback (another
+                // operation, another instance): rollback must NOT pick it.
+                File.WriteAllText(Path.Combine(_root, "decoy.settings"), "[Rendering]\nShadowQuality=0");
+                backups.Backup(_game.Name, Path.Combine(_root, "decoy.settings"));
+                var decoy = backups.Backup(_game.Name, _configPath); // newer backup of the SAME file
+                File.WriteAllText(decoy, "[Rendering]\nShadowQuality=999");
+                return Task.FromResult<FrametimeStatistics?>(null);
+            });
+
+        Assert.NotNull(outcome);
+        Assert.False(outcome.Kept);
+        Assert.Equal("3", IniFile.Parse(File.ReadAllText(_configPath))["Rendering"]["ShadowQuality"]);
+    }
+
+    [Fact]
+    public async Task Average_gain_with_collapsed_one_percent_low_is_rolled_back()
+    {
+        // +4% average but the 1% low tanks by 35%: stutter is felt more than averages.
+        var outcome = await Loop().RunOnceAsync(
+            _game, _setting, Fps(50, 40),
+            () => Task.FromResult<FrametimeStatistics?>(Fps(52, 26)));
+
+        Assert.NotNull(outcome);
+        Assert.False(outcome.Kept);
+        Assert.Contains("smoothness", outcome.Verdict);
+        Assert.Equal("3", IniFile.Parse(File.ReadAllText(_configPath))["Rendering"]["ShadowQuality"]);
+    }
+
+    [Fact]
+    public void Decide_rejects_a_stutter_increase_even_with_better_averages()
+    {
+        var baseline = Fps(50, 45);
+        var after = new FrametimeStatistics
+        {
+            FrameCount = 1000, AverageFps = 54, OnePercentLowFps = 46,
+            AverageFrametimeMs = 18.5, WorstFrametimeMs = 80,
+            StutterCount = 60, StutterPercent = 6, // baseline was 0
+        };
+
+        var decision = OptimizationLoop.Decide(baseline, after);
+
+        Assert.False(decision.Keep);
     }
 }
 
