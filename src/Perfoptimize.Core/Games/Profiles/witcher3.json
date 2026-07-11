@@ -1,21 +1,25 @@
 {
   "name": "The Witcher 3: Wild Hunt",
   "executables": ["witcher3.exe"],
+  "upscalers": ["dlss", "dlss-fg", "fsr"],
   "configFiles": [
     { "path": "%DOCUMENTS%\\The Witcher 3\\user.settings", "format": "ini" }
   ],
   "settings": [
-    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
+    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5, "estimatedGainPercent": 30 },
     {
-      "name": "NVIDIA HairWorks", "impact": "gpu", "qualityLoss": 1, "performanceGain": 4,
+      "name": "NVIDIA HairWorks", "impact": "gpu", "qualityLoss": 1, "performanceGain": 4, "estimatedGainPercent": 12,
       "config": { "file": "user.settings", "section": "Rendering", "key": "HairWorksLevel", "levels": ["0", "1", "2"] }
     },
     {
-      "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3,
+      "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8,
       "config": { "file": "user.settings", "section": "Rendering", "key": "ShadowQuality", "levels": ["0", "1", "2", "3", "4"] }
     },
-    { "name": "Foliage Visibility Range", "impact": "mixed", "qualityLoss": 2, "performanceGain": 3 },
-    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
-    { "name": "Number of Background Characters", "impact": "cpu", "qualityLoss": 1, "performanceGain": 2 }
+    { "name": "Foliage Visibility Range", "impact": "mixed", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 10 },
+    {
+      "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2,
+      "vramGiBByLevel": { "Low": 1.5, "Medium": 2.5, "High": 3.5 }
+    },
+    { "name": "Number of Background Characters", "impact": "cpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 5 }
   ]
 }

@@ -1,16 +1,20 @@
 {
   "name": "Cyberpunk 2077",
   "executables": ["Cyberpunk2077.exe"],
+  "upscalers": ["dlss", "dlss-fg", "fsr", "fsr-fg", "xess"],
   "configFiles": [
     { "path": "%LOCALAPPDATA%\\CD Projekt Red\\Cyberpunk 2077\\UserSettings.json", "format": "json" }
   ],
   "settings": [
-    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 3, "performanceGain": 5 },
-    { "name": "Screen Space Reflections", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },
-    { "name": "Volumetric Fog", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3 },
-    { "name": "Shadows", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
-    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
-    { "name": "Crowd Density", "impact": "cpu", "qualityLoss": 2, "performanceGain": 4 },
-    { "name": "Distant Object Detail (LOD)", "impact": "mixed", "qualityLoss": 3, "performanceGain": 3 }
+    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 3, "performanceGain": 5, "estimatedGainPercent": 30 },
+    { "name": "Screen Space Reflections", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },
+    { "name": "Volumetric Fog", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Shadows", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    {
+      "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2,
+      "vramGiBByLevel": { "Low": 4, "Medium": 5, "High": 7 }
+    },
+    { "name": "Crowd Density", "impact": "cpu", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 10 },
+    { "name": "Distant Object Detail (LOD)", "impact": "mixed", "qualityLoss": 3, "performanceGain": 3, "estimatedGainPercent": 8 }
   ]
 }

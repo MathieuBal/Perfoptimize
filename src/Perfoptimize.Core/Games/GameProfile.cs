@@ -15,6 +15,14 @@ public sealed class GameProfile
     public IReadOnlyList<GameSetting> Settings { get; init; } = [];
     /// <summary>Configuration files the assistant may read (and back up).</summary>
     public IReadOnlyList<GameConfigFile> ConfigFiles { get; init; } = [];
+    /// <summary>
+    /// Upscalers the game ships: "dlss", "fsr", "xess", "dlss-fg", "fsr-fg".
+    /// Null means unknown (generic advice allowed); an explicit empty list means
+    /// the game has none, so upscaling must never be recommended for it.
+    /// </summary>
+    public IReadOnlyList<string>? Upscalers { get; init; }
+    /// <summary>Hard engine frame cap (e.g. 60 for Elden Ring); null when uncapped.</summary>
+    public int? FrameCapFps { get; init; }
 }
 
 /// <summary>Which resource a graphics setting mostly consumes.</summary>
@@ -36,6 +44,17 @@ public sealed class GameSetting
     public int QualityLoss { get; init; }
     /// <summary>Typical FPS gain of lowering this setting, from 0 (none) to 5 (major).</summary>
     public int PerformanceGain { get; init; }
+    /// <summary>
+    /// Typical FPS gain (in percent) of lowering this setting by one step, from
+    /// public benchmarks; 0 when unquantified. Community data refines these.
+    /// </summary>
+    public int EstimatedGainPercent { get; init; }
+    /// <summary>
+    /// For texture-style settings: approximate VRAM needed per quality tier in
+    /// GiB (e.g. {"Low": 4, "Medium": 5, "High": 7}), used to pick the highest
+    /// tier that fits the player's card.
+    /// </summary>
+    public IReadOnlyDictionary<string, double>? VramGiBByLevel { get; init; }
     /// <summary>Where this setting lives in the game's config files; null when unknown.</summary>
     public SettingBinding? Config { get; init; }
 }

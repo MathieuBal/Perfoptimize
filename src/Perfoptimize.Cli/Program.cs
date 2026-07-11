@@ -15,8 +15,11 @@ using Perfoptimize.Core.Storage;
 //   perfoptimize scan --json [f]     Print (or save) the hardware profile as JSON.
 //   perfoptimize games               List the known game profiles.
 //   perfoptimize monitor [-d 30] [--goal quality|balanced|performance]
+//                        [--target-fps 60] [--frametimes capture.csv]
 //                                    Detect the running game, sample telemetry,
-//                                    identify the bottleneck and print advice.
+//                                    identify the bottleneck and print advice
+//                                    sized to the FPS gap when a PresentMon
+//                                    capture of the session is provided.
 //   perfoptimize frametimes <csv>    Analyze a PresentMon capture (FPS, 1% low, stutter).
 //   perfoptimize history [game]      Show past monitoring sessions.
 //   perfoptimize config <game>       Locate a game's config files.
@@ -114,6 +117,28 @@ static async Task<int> RunMonitorAsync(string[] args)
         !Enum.TryParse(args[goalIndex + 1], ignoreCase: true, out goal))
         return Fail($"Unknown goal \"{args[goalIndex + 1]}\". Available: quality, balanced, performance.");
 
+    int? targetFps = null;
+    var targetIndex = Array.IndexOf(args, "--target-fps");
+    if (targetIndex >= 0)
+    {
+        if (targetIndex + 1 >= args.Length ||
+            !int.TryParse(args[targetIndex + 1], out var parsedTarget) || parsedTarget <= 0)
+            return Fail("Usage: --target-fps <positive number>");
+        targetFps = parsedTarget;
+    }
+
+    FrametimeStatistics? frametimeStats = null;
+    var frametimesIndex = Array.IndexOf(args, "--frametimes");
+    if (frametimesIndex >= 0)
+    {
+        if (frametimesIndex + 1 >= args.Length || !File.Exists(args[frametimesIndex + 1]))
+            return Fail("Usage: --frametimes <presentmon.csv> (file must exist)");
+        frametimeStats = FrametimeAnalyzer.Analyze(
+            PresentMonCsv.ReadFrametimes(File.ReadAllText(args[frametimesIndex + 1])));
+        if (frametimeStats is null)
+            return Fail("No frame times found in the provided capture.");
+    }
+
     var hardware = new HardwareScanner().Scan();
     var games = GameProfileRepository.LoadBuiltIn();
     var running = new RunningGameDetector().Detect(games);
@@ -152,17 +177,47 @@ static async Task<int> RunMonitorAsync(string[] args)
     Console.WriteLine($"Bottleneck: {analysis.Type}");
     Console.WriteLine(analysis.Explanation);
 
-    var recommendations = RecommendationEngine.Recommend(analysis, running?.Profile, goal);
-    if (recommendations.Count > 0)
+    var plan = RecommendationEngine.Advise(new AdviceRequest
+    {
+        Analysis = analysis,
+        Game = running?.Profile,
+        Goal = goal,
+        Hardware = hardware,
+        Summary = summary,
+        Frametimes = frametimeStats,
+        TargetFps = targetFps,
+    });
+
+    Console.WriteLine();
+    if (plan.MeasuredAverageFps is { } fps)
+    {
+        var gap = plan.RequiredGainPercent is { } required and > 0
+            ? $" — +{required:0}% needed"
+            : " — target met";
+        Console.WriteLine($"FPS: {fps:0.#} measured, {plan.TargetFps} targeted{gap}");
+        if (plan.EstimatedPlanGainPercent is { } estimated)
+            Console.WriteLine($"Estimated gain of this plan: ~+{estimated:0}%");
+    }
+    else
+    {
+        Console.WriteLine($"Target: {plan.TargetFps} FPS (add --frametimes <capture.csv> to size " +
+                          "the plan to your real FPS gap)");
+    }
+
+    if (plan.Recommendations.Count > 0)
     {
         Console.WriteLine();
         Console.WriteLine($"Recommendations ({goal} goal):");
-        foreach (var recommendation in recommendations)
+        foreach (var recommendation in plan.Recommendations)
         {
-            Console.WriteLine($"- {recommendation.Title}");
+            var gain = recommendation.ExpectedGainPercent is { } g ? $" (~+{g:0}%)" : "";
+            Console.WriteLine($"- {recommendation.Title}{gain}");
             Console.WriteLine($"    {recommendation.Reason}");
         }
     }
+
+    foreach (var note in plan.Notes)
+        Console.WriteLine($"Note: {note}");
 
     try
     {

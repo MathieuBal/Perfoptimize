@@ -1,12 +1,17 @@
 {
   "name": "Elden Ring",
   "executables": ["eldenring.exe"],
+  "upscalers": [],
+  "frameCapFps": 60,
   "settings": [
-    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
-    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
-    { "name": "Volumetric Lighting", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3 },
-    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
-    { "name": "Grass Quality", "impact": "mixed", "qualityLoss": 2, "performanceGain": 3 },
-    { "name": "Effects Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2 }
+    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5, "estimatedGainPercent": 25 },
+    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Volumetric Lighting", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3, "estimatedGainPercent": 8 },
+    {
+      "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2,
+      "vramGiBByLevel": { "Low": 3, "Medium": 4, "High": 5, "Maximum": 6 }
+    },
+    { "name": "Grass Quality", "impact": "mixed", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Effects Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 5 }
   ]
 }
