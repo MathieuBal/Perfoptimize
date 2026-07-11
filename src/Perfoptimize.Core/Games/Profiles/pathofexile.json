@@ -1,0 +1,11 @@
+{
+  "name": "Path of Exile",
+  "executables": ["PathOfExile.exe", "PathOfExileSteam.exe", "PathOfExile_x64.exe", "PathOfExile_x64Steam.exe"],
+  "settings": [
+    { "name": "Shadows", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },
+    { "name": "Global Illumination", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },
+    { "name": "Effects Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
+    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
+    { "name": "Engine Multithreading", "impact": "cpu", "qualityLoss": 0, "performanceGain": 3 }
+  ]
+}

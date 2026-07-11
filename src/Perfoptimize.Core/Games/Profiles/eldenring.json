@@ -1,0 +1,12 @@
+{
+  "name": "Elden Ring",
+  "executables": ["eldenring.exe"],
+  "settings": [
+    { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
+    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
+    { "name": "Volumetric Lighting", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3 },
+    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
+    { "name": "Grass Quality", "impact": "mixed", "qualityLoss": 2, "performanceGain": 3 },
+    { "name": "Effects Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2 }
+  ]
+}

@@ -1,4 +1,3 @@
-using System.Management;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
@@ -194,31 +193,10 @@ public sealed class WindowsHardwareDetector : IHardwareDetector
         return names;
     }
 
-    /// <summary>Runs a WQL query and materializes results; failures yield an empty list.</summary>
-    private static List<Dictionary<string, object?>> Query(string wql, string scope = @"root\cimv2")
-    {
-        var rows = new List<Dictionary<string, object?>>();
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(scope, wql);
-            using var results = searcher.Get();
-            foreach (var item in results)
-            {
-                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                foreach (var property in item.Properties)
-                    row[property.Name] = property.Value;
-                rows.Add(row);
-                item.Dispose();
-            }
-        }
-        catch (ManagementException)
-        {
-            // Class or namespace unavailable on this edition of Windows.
-        }
-        return rows;
-    }
+    private static List<Dictionary<string, object?>> Query(string wql, string scope = @"root\cimv2") =>
+        WmiQuery.Run(wql, scope);
 
-    private static int? ToInt(object? value) => value is null ? null : Convert.ToInt32(value);
+    private static int? ToInt(object? value) => WmiQuery.ToInt(value);
 
-    private static long? ToLong(object? value) => value is null ? null : Convert.ToInt64(value);
+    private static long? ToLong(object? value) => WmiQuery.ToLong(value);
 }

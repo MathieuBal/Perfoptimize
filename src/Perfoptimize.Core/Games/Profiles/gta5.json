@@ -1,0 +1,13 @@
+{
+  "name": "Grand Theft Auto V",
+  "executables": ["GTA5.exe", "GTA5_Enhanced.exe"],
+  "settings": [
+    { "name": "MSAA", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
+    { "name": "Grass Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },
+    { "name": "Post FX", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
+    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3 },
+    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1 },
+    { "name": "Population Density", "impact": "cpu", "qualityLoss": 2, "performanceGain": 3 },
+    { "name": "Distance Scaling", "impact": "mixed", "qualityLoss": 3, "performanceGain": 3 }
+  ]
+}
