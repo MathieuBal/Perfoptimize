@@ -1,6 +1,9 @@
 {
   "name": "Path of Exile",
   "executables": ["PathOfExile.exe", "PathOfExileSteam.exe", "PathOfExile_x64.exe", "PathOfExile_x64Steam.exe"],
+  "configFiles": [
+    { "path": "%DOCUMENTS%\\My Games\\Path of Exile\\production_Config.ini", "format": "ini" }
+  ],
   "settings": [
     { "name": "Shadows", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },
     { "name": "Global Illumination", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },

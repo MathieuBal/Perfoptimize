@@ -13,6 +13,7 @@ de réglages graphiques.
 - ✅ **Étape 5 — FPS et frametimes** (analyse de captures PresentMon : FPS moyens, 1% low, à-coups)
 - ✅ **Étape 6 — objectifs utilisateur** (qualité / équilibré / performances)
 - ✅ **Étape 7 — historique des sessions** (base SQLite locale)
+- ✅ **Étape 8 — fichiers de configuration** (localisation, sauvegarde, restauration)
 
 ### Étape 1 : détection matérielle
 
@@ -36,6 +37,9 @@ dotnet run --project src/Perfoptimize.Cli -- monitor -d 30     # session d'analy
 dotnet run --project src/Perfoptimize.Cli -- monitor --goal quality      # ou balanced, performance
 dotnet run --project src/Perfoptimize.Cli -- frametimes capture.csv      # analyse d'une capture PresentMon
 dotnet run --project src/Perfoptimize.Cli -- history           # dernières sessions enregistrées
+dotnet run --project src/Perfoptimize.Cli -- config witcher              # localiser les fichiers de config
+dotnet run --project src/Perfoptimize.Cli -- config witcher --backup     # sauvegarde horodatée
+dotnet run --project src/Perfoptimize.Cli -- config witcher --restore    # restaurer (jeu fermé uniquement)
 ```
 
 Exemple de session `monitor` :
@@ -126,6 +130,18 @@ liste les dernières sessions. À terme, cet historique permettra de comparer
 une machine à ses propres sessions passées et de partager des résultats entre
 configurations similaires.
 
+### Fichiers de configuration
+
+Les profils de jeux documentent l'emplacement des fichiers de réglages
+(`%DOCUMENTS%\The Witcher 3\user.settings`, `%LOCALAPPDATA%\...\UserSettings.json`…)
+et leur format (INI, JSON, XML). Règles de sécurité, dans cet ordre :
+
+1. **jamais de modification sans sauvegarde horodatée préalable** ;
+2. **jamais d'écriture pendant que le jeu tourne** (il réécrirait le fichier
+   en quittant) — la commande `--restore` refuse si le processus est détecté ;
+3. l'éditeur INI ne touche que la ligne visée et préserve commentaires,
+   ordre et espacement, car certains lanceurs valident leurs propres fichiers.
+
 ### Profils de jeux
 
 Chaque jeu connu est décrit par un JSON embarqué
@@ -161,10 +177,14 @@ src/
 │   ├── Optimization/               # étapes 4 et 6 : analyse, objectifs, recommandations
 │   │   ├── BottleneckDetector.cs
 │   │   └── RecommendationEngine.cs
+│   ├── Configs/                    # étape 8 : fichiers de config (INI, chemins, backups)
+│   │   ├── IniFile.cs
+│   │   ├── ConfigPathResolver.cs
+│   │   └── ConfigBackupService.cs
 │   ├── Storage/                    # étape 7 : historique SQLite des sessions
 │   │   └── SessionStore.cs
 │   └── Formatting/
-└── Perfoptimize.Cli/           # console (scan, games, monitor, frametimes, history)
+└── Perfoptimize.Cli/           # console (scan, games, monitor, frametimes, history, config)
 tests/
 └── Perfoptimize.Core.Tests/    # tests unitaires (parseurs, règles, heuristiques)
 ```
@@ -179,6 +199,6 @@ dotnet test Perfoptimize.sln
 ### Prochaines étapes
 
 1. Capture PresentMon pilotée automatiquement pendant `monitor` (Windows) ;
-2. Lecture des fichiers de configuration des jeux (avec sauvegarde préalable) ;
-3. Application des réglages recommandés jeu fermé + bouton « Restaurer » ;
-4. Interface graphique (WPF/WinUI).
+2. Application des réglages recommandés dans les fichiers de config
+   (jeu fermé, après sauvegarde — les fondations sont en place) ;
+3. Interface graphique (WPF/WinUI).

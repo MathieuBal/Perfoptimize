@@ -1,6 +1,9 @@
 {
   "name": "Grand Theft Auto V",
   "executables": ["GTA5.exe", "GTA5_Enhanced.exe"],
+  "configFiles": [
+    { "path": "%DOCUMENTS%\\Rockstar Games\\GTA V\\settings.xml", "format": "xml" }
+  ],
   "settings": [
     { "name": "MSAA", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
     { "name": "Grass Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },

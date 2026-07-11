@@ -1,3 +1,5 @@
+using Perfoptimize.Core.Configs;
+
 namespace Perfoptimize.Core.Games;
 
 /// <summary>
@@ -11,6 +13,8 @@ public sealed class GameProfile
     /// <summary>Process executable names, with or without ".exe", case-insensitive.</summary>
     public IReadOnlyList<string> Executables { get; init; } = [];
     public IReadOnlyList<GameSetting> Settings { get; init; } = [];
+    /// <summary>Configuration files the assistant may read (and back up).</summary>
+    public IReadOnlyList<GameConfigFile> ConfigFiles { get; init; } = [];
 }
 
 /// <summary>Which resource a graphics setting mostly consumes.</summary>

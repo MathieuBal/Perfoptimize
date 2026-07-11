@@ -1,6 +1,9 @@
 {
   "name": "Cyberpunk 2077",
   "executables": ["Cyberpunk2077.exe"],
+  "configFiles": [
+    { "path": "%LOCALAPPDATA%\\CD Projekt Red\\Cyberpunk 2077\\UserSettings.json", "format": "json" }
+  ],
   "settings": [
     { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 3, "performanceGain": 5 },
     { "name": "Screen Space Reflections", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4 },

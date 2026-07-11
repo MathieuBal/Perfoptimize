@@ -1,3 +1,4 @@
+using Perfoptimize.Core.Configs;
 using Perfoptimize.Core.Formatting;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Hardware;
@@ -18,6 +19,9 @@ using Perfoptimize.Core.Storage;
 //                                    identify the bottleneck and print advice.
 //   perfoptimize frametimes <csv>    Analyze a PresentMon capture (FPS, 1% low, stutter).
 //   perfoptimize history [game]      Show past monitoring sessions.
+//   perfoptimize config <game>       Locate a game's config files.
+//     --backup                       Back them up (timestamped copies).
+//     --restore                      Restore the most recent backup (game must be closed).
 
 var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "scan";
 
@@ -30,7 +34,8 @@ try
         "monitor" => await RunMonitorAsync(args),
         "frametimes" => RunFrametimes(args),
         "history" => RunHistory(args),
-        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history."),
+        "config" => RunConfig(args),
+        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history, config."),
     };
 }
 catch (PlatformNotSupportedException ex)
@@ -246,6 +251,71 @@ static int RunHistory(string[] args)
                           $"vram peak {Percent(session.Summary.PeakVramUsagePercent)}");
     }
     return 0;
+}
+
+static int RunConfig(string[] args)
+{
+    var query = args.SkipWhile(a => a != "config").Skip(1)
+        .FirstOrDefault(a => !a.StartsWith('-'));
+    if (query is null)
+        return Fail("Usage: perfoptimize config <game> [--backup|--restore]");
+
+    var profiles = GameProfileRepository.LoadBuiltIn();
+    var game = profiles.FirstOrDefault(p =>
+                   p.Name.Contains(query, StringComparison.OrdinalIgnoreCase)) ??
+               RunningGameDetector.Match(query, profiles);
+    if (game is null)
+        return Fail($"No known game matches \"{query}\". See \"perfoptimize games\".");
+    if (game.ConfigFiles.Count == 0)
+        return Fail($"{game.Name} has no documented config file (its settings may live in the cloud or the registry).");
+
+    var doBackup = args.Contains("--backup");
+    var doRestore = args.Contains("--restore");
+    if (doBackup && doRestore)
+        return Fail("Choose either --backup or --restore, not both.");
+
+    // Config files must never be written while the game can overwrite them on exit.
+    if (doRestore && new RunningGameDetector().Detect([game]) is { } running)
+        return Fail($"{game.Name} is running (pid {running.ProcessId}) — close it before restoring its config.");
+
+    var backups = new ConfigBackupService(ConfigBackupService.DefaultBackupRoot());
+    Console.WriteLine($"Config files for {game.Name}:");
+    Console.WriteLine();
+
+    var failures = 0;
+    foreach (var configFile in game.ConfigFiles)
+    {
+        var path = configFile.ResolvePath();
+        var exists = File.Exists(path);
+        Console.WriteLine($"- {path}");
+        Console.WriteLine($"    format {configFile.Format}, {(exists ? "found" : "not found")}, " +
+                          $"{backups.ListBackups(game.Name, path).Count} backup(s)");
+
+        if (doBackup)
+        {
+            if (!exists)
+            {
+                Console.WriteLine("    skipped backup: file not found");
+                continue;
+            }
+            var backupPath = backups.Backup(game.Name, path);
+            Console.WriteLine($"    backed up to {backupPath}");
+        }
+        else if (doRestore)
+        {
+            var restored = backups.RestoreLatest(game.Name, path);
+            if (restored is null)
+            {
+                Console.WriteLine("    no backup to restore");
+                failures++;
+            }
+            else
+            {
+                Console.WriteLine($"    restored from {Path.GetFileName(restored)}");
+            }
+        }
+    }
+    return failures == 0 ? 0 : 1;
 }
 
 static string Percent(double? value) => value is { } v ? $"{v:0}%" : "n/a";

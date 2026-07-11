@@ -1,6 +1,9 @@
 {
   "name": "The Witcher 3: Wild Hunt",
   "executables": ["witcher3.exe"],
+  "configFiles": [
+    { "path": "%DOCUMENTS%\\The Witcher 3\\user.settings", "format": "ini" }
+  ],
   "settings": [
     { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5 },
     { "name": "NVIDIA HairWorks", "impact": "gpu", "qualityLoss": 1, "performanceGain": 4 },
