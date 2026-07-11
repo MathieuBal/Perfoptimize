@@ -8,6 +8,16 @@ public sealed class Recommendation
     public string Reason { get; init; } = "";
 }
 
+/// <summary>What the player wants to preserve when trading quality for FPS.</summary>
+public enum OptimizationGoal
+{
+    /// <summary>Sacrifice as little visual quality as possible.</summary>
+    Quality,
+    Balanced,
+    /// <summary>Get the most FPS, visual cost is secondary.</summary>
+    Performance,
+}
+
 /// <summary>
 /// Turns a bottleneck analysis into concrete, prioritized setting suggestions.
 /// With a game profile, it ranks that game's settings by efficiency
@@ -16,18 +26,18 @@ public sealed class Recommendation
 /// </summary>
 public static class RecommendationEngine
 {
-    private const int MaxProfileSuggestions = 3;
-
     public static IReadOnlyList<Recommendation> Recommend(
-        BottleneckAnalysis analysis, GameProfile? game = null)
+        BottleneckAnalysis analysis, GameProfile? game = null,
+        OptimizationGoal goal = OptimizationGoal.Balanced)
     {
         var recommendations = new List<Recommendation>();
-        recommendations.AddRange(FromGameProfile(analysis.Type, game));
-        recommendations.AddRange(GenericAdvice(analysis.Type));
+        recommendations.AddRange(FromGameProfile(analysis.Type, game, goal));
+        recommendations.AddRange(GenericAdvice(analysis.Type, goal));
         return recommendations;
     }
 
-    private static IEnumerable<Recommendation> FromGameProfile(BottleneckType bottleneck, GameProfile? game)
+    private static IEnumerable<Recommendation> FromGameProfile(
+        BottleneckType bottleneck, GameProfile? game, OptimizationGoal goal)
     {
         if (game is null)
             yield break;
@@ -35,9 +45,10 @@ public static class RecommendationEngine
         var relevantImpacts = RelevantImpacts(bottleneck);
         var candidates = game.Settings
             .Where(s => relevantImpacts.Contains(s.Impact) && s.PerformanceGain > 0)
-            .OrderByDescending(s => s.PerformanceGain - s.QualityLoss)
+            .Where(s => goal != OptimizationGoal.Quality || s.QualityLoss <= 2)
+            .OrderByDescending(s => Score(s, goal))
             .ThenByDescending(s => s.PerformanceGain)
-            .Take(MaxProfileSuggestions);
+            .Take(MaxSuggestions(goal));
 
         foreach (var setting in candidates)
         {
@@ -48,6 +59,17 @@ public static class RecommendationEngine
             };
         }
     }
+
+    /// <summary>Ranking score: how much the goal weighs visual cost against FPS gained.</summary>
+    private static int Score(GameSetting setting, OptimizationGoal goal) => goal switch
+    {
+        OptimizationGoal.Quality => setting.PerformanceGain - 2 * setting.QualityLoss,
+        OptimizationGoal.Performance => 2 * setting.PerformanceGain - setting.QualityLoss,
+        _ => setting.PerformanceGain - setting.QualityLoss,
+    };
+
+    private static int MaxSuggestions(OptimizationGoal goal) =>
+        goal == OptimizationGoal.Performance ? 5 : 3;
 
     private static HashSet<SettingImpact> RelevantImpacts(BottleneckType bottleneck) => bottleneck switch
     {
@@ -60,14 +82,15 @@ public static class RecommendationEngine
         _ => [],
     };
 
-    private static IEnumerable<Recommendation> GenericAdvice(BottleneckType bottleneck)
+    private static IEnumerable<Recommendation> GenericAdvice(BottleneckType bottleneck, OptimizationGoal goal)
     {
         switch (bottleneck)
         {
             case BottleneckType.Gpu:
+                var upscalingMode = goal == OptimizationGoal.Performance ? "Balanced or Performance" : "Quality";
                 yield return new Recommendation
                 {
-                    Title = "Enable upscaling (DLSS / FSR / XeSS) in Quality mode",
+                    Title = $"Enable upscaling (DLSS / FSR / XeSS) in {upscalingMode} mode",
                     Reason = "Renders at a lower internal resolution for a large GPU-side gain with minimal visual cost.",
                 };
                 yield return new Recommendation

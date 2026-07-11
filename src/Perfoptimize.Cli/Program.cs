@@ -2,17 +2,22 @@ using Perfoptimize.Core.Formatting;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Hardware;
 using Perfoptimize.Core.Monitoring;
+using Perfoptimize.Core.Monitoring.Frametimes;
 using Perfoptimize.Core.Monitoring.Windows;
 using Perfoptimize.Core.Optimization;
+using Perfoptimize.Core.Storage;
 
 // Perfoptimize CLI — game optimization assistant.
 //
 // Usage:
-//   perfoptimize [scan]            Print a human-readable hardware report.
-//   perfoptimize scan --json [f]   Print (or save) the hardware profile as JSON.
-//   perfoptimize games             List the known game profiles.
-//   perfoptimize monitor [-d 30]   Detect the running game, sample telemetry,
-//                                  identify the bottleneck and print advice.
+//   perfoptimize [scan]              Print a human-readable hardware report.
+//   perfoptimize scan --json [f]     Print (or save) the hardware profile as JSON.
+//   perfoptimize games               List the known game profiles.
+//   perfoptimize monitor [-d 30] [--goal quality|balanced|performance]
+//                                    Detect the running game, sample telemetry,
+//                                    identify the bottleneck and print advice.
+//   perfoptimize frametimes <csv>    Analyze a PresentMon capture (FPS, 1% low, stutter).
+//   perfoptimize history [game]      Show past monitoring sessions.
 
 var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "scan";
 
@@ -23,7 +28,9 @@ try
         "scan" => RunScan(args),
         "games" => RunGames(),
         "monitor" => await RunMonitorAsync(args),
-        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor."),
+        "frametimes" => RunFrametimes(args),
+        "history" => RunHistory(args),
+        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history."),
     };
 }
 catch (PlatformNotSupportedException ex)
@@ -90,6 +97,12 @@ static async Task<int> RunMonitorAsync(string[] args)
         int.TryParse(args[durationIndex + 1], out var parsed) && parsed > 0)
         durationSeconds = parsed;
 
+    var goal = OptimizationGoal.Balanced;
+    var goalIndex = Array.IndexOf(args, "--goal");
+    if (goalIndex >= 0 && goalIndex + 1 < args.Length &&
+        !Enum.TryParse(args[goalIndex + 1], ignoreCase: true, out goal))
+        return Fail($"Unknown goal \"{args[goalIndex + 1]}\". Available: quality, balanced, performance.");
+
     var hardware = new HardwareScanner().Scan();
     var games = GameProfileRepository.LoadBuiltIn();
     var running = new RunningGameDetector().Detect(games);
@@ -128,16 +141,109 @@ static async Task<int> RunMonitorAsync(string[] args)
     Console.WriteLine($"Bottleneck: {analysis.Type}");
     Console.WriteLine(analysis.Explanation);
 
-    var recommendations = RecommendationEngine.Recommend(analysis, running?.Profile);
+    var recommendations = RecommendationEngine.Recommend(analysis, running?.Profile, goal);
     if (recommendations.Count > 0)
     {
         Console.WriteLine();
-        Console.WriteLine("Recommendations:");
+        Console.WriteLine($"Recommendations ({goal} goal):");
         foreach (var recommendation in recommendations)
         {
             Console.WriteLine($"- {recommendation.Title}");
             Console.WriteLine($"    {recommendation.Reason}");
         }
+    }
+
+    try
+    {
+        using var store = new SessionStore(SessionStore.DefaultDatabasePath());
+        var id = store.Save(new SessionRecord
+        {
+            StartedAt = DateTimeOffset.Now.AddSeconds(-durationSeconds),
+            GameName = running?.Profile.Name,
+            Bottleneck = analysis.Type,
+            Summary = summary,
+        });
+        Console.WriteLine();
+        Console.WriteLine($"Session #{id} saved — see \"perfoptimize history\".");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Could not save the session: {ex.Message}");
+    }
+    return 0;
+}
+
+static int RunFrametimes(string[] args)
+{
+    string? csvPath = null;
+    var tail = args.SkipWhile(a => a != "frametimes").Skip(1).ToArray();
+    for (var i = 0; i < tail.Length; i++)
+    {
+        if (tail[i].StartsWith('-'))
+        {
+            i++; // skip the flag's value ("--process game.exe")
+            continue;
+        }
+        csvPath = tail[i];
+        break;
+    }
+    if (csvPath is null)
+        return Fail("Usage: perfoptimize frametimes <presentmon.csv> [--process game.exe]");
+    if (!File.Exists(csvPath))
+        return Fail($"File not found: {csvPath}");
+
+    string? processName = null;
+    var processIndex = Array.IndexOf(args, "--process");
+    if (processIndex >= 0 && processIndex + 1 < args.Length)
+        processName = args[processIndex + 1];
+
+    var frametimes = PresentMonCsv.ReadFrametimes(File.ReadAllText(csvPath), processName);
+    var statistics = FrametimeAnalyzer.Analyze(frametimes);
+    if (statistics is null)
+        return Fail("No frame times found in this file. Is it a PresentMon capture" +
+                    (processName is null ? "?" : $" containing \"{processName}\"?"));
+
+    Console.WriteLine($"=== Frametime analysis — {Path.GetFileName(csvPath)} ===");
+    Console.WriteLine();
+    Console.WriteLine($"Frames analyzed : {statistics.FrameCount}");
+    Console.WriteLine($"Average FPS     : {statistics.AverageFps:0.#}");
+    Console.WriteLine($"1% low FPS      : {statistics.OnePercentLowFps:0.#}");
+    Console.WriteLine($"Avg frametime   : {statistics.AverageFrametimeMs:0.##} ms");
+    Console.WriteLine($"Worst frametime : {statistics.WorstFrametimeMs:0.##} ms");
+    Console.WriteLine($"Stutters        : {statistics.StutterCount} ({statistics.StutterPercent:0.##}% of frames)");
+    Console.WriteLine();
+    Console.WriteLine(statistics.StutterPercent > 1
+        ? "Frame delivery is uneven — prioritize fixing stutter (VRAM/RAM pressure, background apps) before chasing average FPS."
+        : "Frame delivery is smooth.");
+    return 0;
+}
+
+static int RunHistory(string[] args)
+{
+    var gameName = args.SkipWhile(a => a != "history").Skip(1)
+        .FirstOrDefault(a => !a.StartsWith('-'));
+
+    using var store = new SessionStore(SessionStore.DefaultDatabasePath());
+    var sessions = store.GetRecent(limit: 10, gameName);
+    if (sessions.Count == 0)
+    {
+        Console.WriteLine(gameName is null
+            ? "No monitoring session recorded yet — run \"perfoptimize monitor\" first."
+            : $"No session recorded for \"{gameName}\".");
+        return 0;
+    }
+
+    Console.WriteLine($"Last {sessions.Count} session(s){(gameName is null ? "" : $" for {gameName}")}:");
+    Console.WriteLine();
+    foreach (var session in sessions)
+    {
+        var game = session.GameName ?? "system-wide";
+        Console.WriteLine($"#{session.Id} — {session.StartedAt:yyyy-MM-dd HH:mm} — {game}");
+        Console.WriteLine($"    bottleneck {session.Bottleneck}, " +
+                          $"cpu avg {Percent(session.Summary.AverageCpuUsagePercent)}, " +
+                          $"gpu avg {Percent(session.Summary.AverageGpuUsagePercent)}, " +
+                          $"ram peak {Percent(session.Summary.PeakRamUsagePercent)}, " +
+                          $"vram peak {Percent(session.Summary.PeakVramUsagePercent)}");
     }
     return 0;
 }

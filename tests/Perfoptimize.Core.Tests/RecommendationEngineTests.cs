@@ -71,4 +71,28 @@ public class RecommendationEngineTests
             Assert.True(recommendations.Count > 0, $"No recommendation for {type}");
         }
     }
+
+    [Fact]
+    public void Quality_goal_excludes_settings_with_a_high_visual_cost()
+    {
+        var recommendations = RecommendationEngine.Recommend(
+            Analysis(BottleneckType.Gpu), Game, OptimizationGoal.Quality);
+
+        // Ray Tracing costs 3/5 visually: too expensive for the Quality goal.
+        Assert.DoesNotContain(recommendations, r => r.Title.Contains("Ray Tracing") && r.Title.Contains(Game.Name));
+        Assert.Contains(recommendations, r => r.Title.Contains("Volumetric Fog"));
+        // The generic upscaling advice stays on its least destructive mode.
+        Assert.Contains(recommendations, r => r.Title.Contains("in Quality mode"));
+    }
+
+    [Fact]
+    public void Performance_goal_suggests_more_settings_and_aggressive_upscaling()
+    {
+        var balanced = RecommendationEngine.Recommend(Analysis(BottleneckType.Gpu), Game);
+        var performance = RecommendationEngine.Recommend(
+            Analysis(BottleneckType.Gpu), Game, OptimizationGoal.Performance);
+
+        Assert.True(performance.Count > balanced.Count);
+        Assert.Contains(performance, r => r.Title.Contains("Balanced or Performance mode"));
+    }
 }

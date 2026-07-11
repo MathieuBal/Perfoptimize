@@ -10,6 +10,9 @@ de réglages graphiques.
 - ✅ **Étape 2 — détection du jeu lancé** (profils de jeux JSON + surveillance des processus)
 - ✅ **Étape 3 — moniteur de performances** (CPU, GPU, RAM, VRAM, températures)
 - ✅ **Étape 4 — goulot d'étranglement et recommandations** (premières règles)
+- ✅ **Étape 5 — FPS et frametimes** (analyse de captures PresentMon : FPS moyens, 1% low, à-coups)
+- ✅ **Étape 6 — objectifs utilisateur** (qualité / équilibré / performances)
+- ✅ **Étape 7 — historique des sessions** (base SQLite locale)
 
 ### Étape 1 : détection matérielle
 
@@ -30,6 +33,9 @@ dotnet run --project src/Perfoptimize.Cli -- scan --json       # profil JSON sur
 dotnet run --project src/Perfoptimize.Cli -- scan --json hardware-profile.json
 dotnet run --project src/Perfoptimize.Cli -- games             # profils de jeux connus + jeu en cours
 dotnet run --project src/Perfoptimize.Cli -- monitor -d 30     # session d'analyse de 30 s
+dotnet run --project src/Perfoptimize.Cli -- monitor --goal quality      # ou balanced, performance
+dotnet run --project src/Perfoptimize.Cli -- frametimes capture.csv      # analyse d'une capture PresentMon
+dotnet run --project src/Perfoptimize.Cli -- history           # dernières sessions enregistrées
 ```
 
 Exemple de session `monitor` :
@@ -94,6 +100,32 @@ Principes de conception :
 - **Toutes les mesures sont nullables** : « capteur absent » n'est jamais
   confondu avec « valeur zéro », et les règles de décision en tiennent compte.
 
+### FPS et frametimes
+
+La mesure des FPS réels se fait sans injection via
+[PresentMon](https://github.com/GameTechDev/PresentMon) (Intel) : on capture un
+CSV pendant la session de jeu, puis `perfoptimize frametimes capture.csv`
+calcule FPS moyens, **1% low**, pire frametime et pourcentage d'à-coups
+(frames ≥ 2 × la médiane). Un jeu à 70 FPS avec de gros à-coups est moins
+agréable qu'un jeu stable à 60 FPS — c'est précisément ce que ces métriques
+révèlent. Les formats CSV de PresentMon v1 (`MsBetweenPresents`) et v2
+(`FrameTime`) sont pris en charge, avec filtre `--process jeu.exe`.
+
+### Objectifs utilisateur
+
+`monitor --goal quality|balanced|performance` change le classement des
+recommandations : en mode *quality*, les réglages au coût visuel élevé sont
+exclus ; en mode *performance*, davantage de réglages sont proposés et
+l'upscaling passe en mode Équilibré/Performance.
+
+### Historique
+
+Chaque session `monitor` est enregistrée dans une base SQLite locale
+(`%LocalAppData%/Perfoptimize/perfoptimize.db`) ; `perfoptimize history [jeu]`
+liste les dernières sessions. À terme, cet historique permettra de comparer
+une machine à ses propres sessions passées et de partager des résultats entre
+configurations similaires.
+
 ### Profils de jeux
 
 Chaque jeu connu est décrit par un JSON embarqué
@@ -119,17 +151,20 @@ src/
 │   │   ├── GameProfileRepository.cs
 │   │   ├── RunningGameDetector.cs
 │   │   └── Profiles/*.json
-│   ├── Monitoring/                 # étape 3 : télémétrie système
+│   ├── Monitoring/                 # étapes 3 et 5 : télémétrie et frametimes
 │   │   ├── TelemetrySample.cs
 │   │   ├── PerformanceMonitor.cs
 │   │   ├── PerformanceSummary.cs
+│   │   ├── Frametimes/             # statistiques FPS + parseur CSV PresentMon
 │   │   ├── Windows/                # compteurs WMI (GPU Engine, GPU Adapter Memory)
 │   │   └── Linux/                  # /proc/stat, hwmon, nvidia-smi
-│   ├── Optimization/               # étape 4 : analyse et recommandations
+│   ├── Optimization/               # étapes 4 et 6 : analyse, objectifs, recommandations
 │   │   ├── BottleneckDetector.cs
 │   │   └── RecommendationEngine.cs
+│   ├── Storage/                    # étape 7 : historique SQLite des sessions
+│   │   └── SessionStore.cs
 │   └── Formatting/
-└── Perfoptimize.Cli/           # application console (scan, games, monitor)
+└── Perfoptimize.Cli/           # console (scan, games, monitor, frametimes, history)
 tests/
 └── Perfoptimize.Core.Tests/    # tests unitaires (parseurs, règles, heuristiques)
 ```
@@ -143,8 +178,7 @@ dotnet test Perfoptimize.sln
 
 ### Prochaines étapes
 
-1. Mesure des FPS et des frametimes (via PresentMon/ETW, sans injection) ;
-2. Historique des sessions dans une base SQLite ;
-3. Lecture des fichiers de configuration des jeux (avec sauvegarde préalable) ;
-4. Objectifs utilisateur (qualité / équilibré / performances) ;
-5. Interface graphique (WPF/WinUI).
+1. Capture PresentMon pilotée automatiquement pendant `monitor` (Windows) ;
+2. Lecture des fichiers de configuration des jeux (avec sauvegarde préalable) ;
+3. Application des réglages recommandés jeu fermé + bouton « Restaurer » ;
+4. Interface graphique (WPF/WinUI).
