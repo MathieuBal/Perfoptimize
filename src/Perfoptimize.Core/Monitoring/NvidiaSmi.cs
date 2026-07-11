@@ -10,11 +10,21 @@ public readonly record struct NvidiaGpuStatus(
 {
     // clocks_throttle_reasons bit values documented by NVML:
     // 0x08 HwSlowdown, 0x20 SwThermalSlowdown, 0x40 HwThermalSlowdown, 0x80 HwPowerBrakeSlowdown.
-    private const ulong ThermalSlowdownMask = 0x08 | 0x20 | 0x40 | 0x80;
+    // Only the explicitly thermal bits may be reported as thermal; a generic HW
+    // slowdown or power brake can be power delivery and must stay a separate cause.
+    private const ulong ThermalSlowdownMask = 0x20 | 0x40;
+    private const ulong HardwareSlowdownMask = 0x08 | 0x80;
 
-    /// <summary>True when the driver reports an active thermal/hardware slowdown; null when unknown.</summary>
+    /// <summary>True when the driver reports an active thermal slowdown; null when unknown.</summary>
     public bool? ThermalThrottleActive =>
         ThrottleReasonsMask is { } mask ? (mask & ThermalSlowdownMask) != 0 : null;
+
+    /// <summary>
+    /// True when the driver reports a non-thermal hardware slowdown (HW slowdown,
+    /// power brake) — the card is held back, but possibly by power, not heat.
+    /// </summary>
+    public bool? HardwareSlowdownActive =>
+        ThrottleReasonsMask is { } mask ? (mask & HardwareSlowdownMask) != 0 : null;
 }
 
 /// <summary>

@@ -18,6 +18,8 @@ de réglages graphiques.
 - ✅ **Étape 10 — conseiller contextuel** (objectif FPS, matériel réel, spécificités du jeu)
 - ✅ **Étape 11 — pipeline de mesure v2** (attribution au processus du jeu, charge par cœur,
   throttling confirmé par le pilote, PresentMon intégré à `monitor`)
+- ✅ **Étape 12 — diagnostic v3 et boucle mesurée** (attribution utilisée dans les verdicts,
+  contention GPU externe, confiance, plan de session appliqué à l'identique, `tune`)
 
 ### Étape 1 : détection matérielle
 
@@ -45,7 +47,8 @@ dotnet run --project src/Perfoptimize.Cli -- config witcher              # local
 dotnet run --project src/Perfoptimize.Cli -- config witcher --backup     # sauvegarde horodatée
 dotnet run --project src/Perfoptimize.Cli -- config witcher --restore    # restaurer (jeu fermé uniquement)
 dotnet run --project src/Perfoptimize.Cli -- apply witcher               # prévisualiser les modifications
-dotnet run --project src/Perfoptimize.Cli -- apply witcher --bottleneck gpu --write   # appliquer
+dotnet run --project src/Perfoptimize.Cli -- apply witcher --session 3 --write   # appliquer le plan de la session 3
+dotnet run --project src/Perfoptimize.Cli -- tune witcher                # boucle mesurée : 1 changement, vérifié
 ```
 
 Exemple de session `monitor` :
@@ -152,6 +155,51 @@ pipeline attribue donc les mesures au processus détecté :
   `PERFOPTIMIZE_PRESENTMON`), `monitor` capture automatiquement les vrais
   frametimes du jeu pendant la session — plus besoin de la manœuvre manuelle
   en deux commandes.
+
+### Diagnostic v3 : des verdicts qui disent leur degré de certitude
+
+- **L'attribution sert au verdict, pas seulement à l'affichage** : jeu ≥ 90 %
+  du GPU → limité GPU *confirmé* ; adaptateur saturé mais jeu ≤ 70 % →
+  **contention GPU externe** (navigateur, OBS…) avec pour seul conseil de
+  fermer ces applications, pas de baisser la qualité ; attribution absente →
+  verdict *suspecté*, dit comme tel. Même logique côté CPU : un cœur saturé
+  alors que le processus du jeu n'utilise même pas l'équivalent d'un cœur →
+  « un autre programme est probablement responsable ».
+- **Causes de ralentissement séparées** : bits thermiques du pilote
+  (`SwThermalSlowdown`, `HwThermalSlowdown`) → throttling **confirmé** ;
+  `HwSlowdown`/`HwPowerBrake` → ralentissement matériel *suspecté* (peut être
+  l'alimentation) ; température seule → suspicion explicite.
+- **Gains affichés en fourchette** (`+25 % à +46 %`) : les gains estimés
+  interagissent et ne s'additionnent pas linéairement — le plan le dit et
+  invite à re-mesurer.
+- **Sélection à coût visuel minimal** : pour combler +5 %, le moteur choisit
+  le brouillard volumétrique (gain 8 %, coût visuel 1) plutôt que le ray
+  tracing (gain 30 %, coût 3) — recherche du sous-ensemble couvrant l'écart
+  avec le minimum de perte visuelle.
+- **Frame Generation refusée sous ~45 FPS réels** (latence et artefacts), et
+  capacité FSR-FG restreinte aux cartes réellement modernes (RTX, RX 5000+,
+  Arc). L'objectif FPS est aussi plafonné à la fréquence de l'écran.
+
+### Boucle d'optimisation mesurée (`tune`)
+
+Le cœur du produit : ne plus estimer, **vérifier**.
+
+```text
+1. Mesure de référence (PresentMon)         48,1 FPS / 1% low 48,1
+2. UN seul changement appliqué              HairWorks 2 → 1 (sauvegardé)
+3. Re-mesure dans la même scène             56,2 FPS
+4. Verdict                                  +16,8 % mesuré → conservé
+   (ou : +0,8 % → restauration automatique des anciens réglages)
+```
+
+Une seconde mesure impossible = restauration systématique : un changement
+invérifiable ne reste jamais. Sous Windows, `tune <jeu>` pilote PresentMon et
+guide l'utilisateur (fermer le jeu, relancer, revenir à la même scène) ;
+partout, `--baseline`/`--after` acceptent deux captures CSV.
+
+Chaque session `monitor` enregistre en plus son **plan exact**, l'objectif,
+les FPS moyens et le 1% low ; `apply <jeu> --session <id>` applique ce plan-là
+— plus jamais un plan recalculé différent de celui que l'utilisateur a vu.
 
 ### Conseiller contextuel
 
@@ -301,9 +349,10 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
 
 ### Prochaines étapes
 
-1. **Boucle d'optimisation mesurée** : référence 60 s → un seul changement →
-   re-mesure dans la même scène → comparaison avant/après → conservation ou
-   restauration automatique ;
-2. Écriture JSON/XML (Cyberpunk 2077, GTA V) et lecture des réglages actuels ;
-3. Détection d'écrans via les API d'affichage Windows ;
-4. Interface graphique (WPF/WinUI), après fiabilisation du diagnostic.
+1. Validation sur plusieurs vraies machines Windows (compteurs GPU réels,
+   PresentMon, multi-GPU) ;
+2. Correspondance LUID → capacité VRAM par adaptateur (aujourd'hui le
+   dénominateur VRAM vient du GPU « principal » supposé) ;
+3. Écriture JSON/XML (Cyberpunk 2077, GTA V) et lecture des réglages actuels ;
+4. Détection d'écrans via les API d'affichage Windows ;
+5. Interface graphique (WPF/WinUI), après validation du diagnostic.

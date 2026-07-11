@@ -20,10 +20,20 @@ public static partial class GpuCapabilities
         SupportsDlss(gpu) && RtxModelNumber(gpu.Name) >= 4000;
 
     /// <summary>
-    /// FSR runs on any reasonably modern GPU, and FSR 3 frame generation is
-    /// vendor-agnostic; requiring a discrete card keeps expectations honest.
+    /// FSR 3 frame generation is vendor-agnostic but AMD only supports it on
+    /// RX 5000 and newer (and it needs a reasonably modern card to feel good):
+    /// NVIDIA RTX, AMD RX 5000+, or Intel Arc. A GTX 1060 "supporting" frame
+    /// generation on paper would be a recipe for disappointment.
     /// </summary>
-    public static bool SupportsFsrFrameGeneration(GpuInfo gpu) => gpu.IsDiscrete;
+    public static bool SupportsFsrFrameGeneration(GpuInfo gpu)
+    {
+        if (!gpu.IsDiscrete)
+            return false;
+        if (SupportsDlss(gpu) || IsIntelArc(gpu))
+            return true;
+        return gpu.Vendor.Equals("AMD", StringComparison.OrdinalIgnoreCase) &&
+               RxModelNumber(gpu.Name) >= 5000;
+    }
 
     public static bool IsIntelArc(GpuInfo gpu) =>
         gpu.Vendor.Equals("Intel", StringComparison.OrdinalIgnoreCase) &&
@@ -70,6 +80,16 @@ public static partial class GpuCapabilities
         return match.Success ? int.Parse(match.Groups["model"].Value) : null;
     }
 
+    /// <summary>"AMD Radeon RX 6700 XT" → 6700; null when no RX model is found.</summary>
+    public static int? RxModelNumber(string gpuName)
+    {
+        var match = RxModelRegex().Match(gpuName);
+        return match.Success ? int.Parse(match.Groups["model"].Value) : null;
+    }
+
     [GeneratedRegex(@"RTX\s*(?<model>\d{4})", RegexOptions.IgnoreCase)]
     private static partial Regex RtxModelRegex();
+
+    [GeneratedRegex(@"RX\s*(?<model>\d{4})", RegexOptions.IgnoreCase)]
+    private static partial Regex RxModelRegex();
 }

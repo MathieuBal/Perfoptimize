@@ -26,6 +26,8 @@ public sealed class PerformanceSummary
     public double? AverageGpuCoreClockMhz { get; init; }
     /// <summary>True when the driver reported an active thermal slowdown at least once.</summary>
     public bool GpuThermalThrottleObserved { get; init; }
+    /// <summary>True when the driver reported a non-thermal hardware slowdown at least once.</summary>
+    public bool GpuHardwareSlowdownObserved { get; init; }
 }
 
 public static class TelemetryAggregator
@@ -55,6 +57,7 @@ public static class TelemetryAggregator
             PeakGpuTemperatureC = Max(samples, s => s.GpuTemperatureC),
             AverageGpuCoreClockMhz = Average(samples, s => s.GpuCoreClockMhz),
             GpuThermalThrottleObserved = samples.Any(s => s.GpuThermalThrottleActive == true),
+            GpuHardwareSlowdownObserved = samples.Any(s => s.GpuHardwareSlowdownActive == true),
         };
     }
 

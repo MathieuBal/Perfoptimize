@@ -10,20 +10,33 @@ namespace Perfoptimize.Core.Configs;
 /// </summary>
 public static class SafeFileWriter
 {
-    /// <summary>Detects the encoding of an existing file from its BOM (UTF-8 without BOM otherwise).</summary>
+    /// <summary>
+    /// Detects the encoding of an existing file: BOM first, then a strict UTF-8
+    /// validation pass. A BOM-less file that is not valid UTF-8 (a legacy
+    /// Windows-1252 INI, for instance) falls back to Latin-1, which round-trips
+    /// every byte unchanged instead of corrupting accented characters.
+    /// </summary>
     public static Encoding DetectEncoding(string path)
     {
-        Span<byte> preamble = stackalloc byte[3];
-        using var stream = File.OpenRead(path);
-        var read = stream.Read(preamble);
+        var bytes = File.ReadAllBytes(path);
 
-        if (read >= 3 && preamble[0] == 0xEF && preamble[1] == 0xBB && preamble[2] == 0xBF)
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             return new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-        if (read >= 2 && preamble[0] == 0xFF && preamble[1] == 0xFE)
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
             return Encoding.Unicode;           // UTF-16 LE
-        if (read >= 2 && preamble[0] == 0xFE && preamble[1] == 0xFF)
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
             return Encoding.BigEndianUnicode;  // UTF-16 BE
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+        try
+        {
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+                .GetString(bytes);
+            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        }
+        catch (DecoderFallbackException)
+        {
+            return Encoding.Latin1;
+        }
     }
 
     /// <summary>
@@ -35,7 +48,9 @@ public static class SafeFileWriter
     {
         var encoding = DetectEncoding(path);
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
-        var tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.perfoptimize-tmp");
+        // Unique temp name: two Perfoptimize instances must never collide.
+        var tempPath = Path.Combine(directory,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.perfoptimize-tmp");
 
         try
         {

@@ -33,6 +33,8 @@ public sealed class TelemetrySample
     public double? GpuCoreClockMhz { get; init; }
     /// <summary>True when the driver itself reports an active thermal slowdown.</summary>
     public bool? GpuThermalThrottleActive { get; init; }
+    /// <summary>True when the driver reports a non-thermal hardware slowdown (power brake, HW slowdown).</summary>
+    public bool? GpuHardwareSlowdownActive { get; init; }
 }
 
 /// <summary>Produces telemetry samples for the current platform.</summary>
