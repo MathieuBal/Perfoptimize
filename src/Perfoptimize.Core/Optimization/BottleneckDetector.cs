@@ -34,6 +34,7 @@ public static class BottleneckDetector
     private const double RamPressurePercent = 90;
     private const double GpuBoundPercent = 92;
     private const double CpuBoundPercent = 85;
+    private const double SingleCoreBoundPercent = 90;
     private const double GpuIdleWhileCpuBoundPercent = 80;
 
     public static BottleneckAnalysis Analyze(PerformanceSummary summary)
@@ -47,13 +48,30 @@ public static class BottleneckDetector
             };
         }
 
+        // Throttling confirmed by the driver beats any inference from temperature.
+        if (summary.GpuThermalThrottleObserved)
+        {
+            var clock = summary.AverageGpuCoreClockMhz is { } mhz ? $" (average clock {mhz:0} MHz)" : "";
+            return new BottleneckAnalysis
+            {
+                Type = BottleneckType.Thermal,
+                Explanation = "The GPU driver reported an active thermal slowdown during the session" +
+                              $"{clock} — this is confirmed throttling, not a guess. Improve airflow " +
+                              "or cap the frame rate before touching quality settings.",
+            };
+        }
+
+        // A high temperature alone proves nothing: limits vary per model and
+        // laptop profile. Report it as a suspicion, clearly labeled as such.
         if (summary.PeakGpuTemperatureC >= GpuThermalLimitC)
         {
             return new BottleneckAnalysis
             {
                 Type = BottleneckType.Thermal,
-                Explanation = $"The GPU reached {summary.PeakGpuTemperatureC:0}°C and is likely throttling. " +
-                              "Improve airflow or cap the frame rate before touching quality settings.",
+                Explanation = $"The GPU reached {summary.PeakGpuTemperatureC:0}°C. That is hot enough to " +
+                              "suspect throttling, but it is NOT confirmed — the driver reported no " +
+                              "slowdown (or could not be queried). Watch the core clock under load " +
+                              "before concluding.",
             };
         }
 
@@ -62,8 +80,9 @@ public static class BottleneckDetector
             return new BottleneckAnalysis
             {
                 Type = BottleneckType.Thermal,
-                Explanation = $"The CPU reached {summary.PeakCpuTemperatureC:0}°C and is likely throttling. " +
-                              "Check cooling before touching quality settings.",
+                Explanation = $"The CPU reached {summary.PeakCpuTemperatureC:0}°C. That is hot enough to " +
+                              "suspect throttling, but the sensor may not even be the CPU's own — " +
+                              "verify frequencies under load before concluding.",
             };
         }
 
@@ -106,6 +125,25 @@ public static class BottleneckDetector
                 Type = BottleneckType.Cpu,
                 Explanation = $"The CPU averaged {summary.AverageCpuUsagePercent:0}% while the GPU had headroom — " +
                               "simulation or draw-call load is the limiting factor.",
+            };
+        }
+
+        // The classic trap: one core pinned at 100% while the machine-wide
+        // average looks idle. Games with a dominant main/render thread live here.
+        if (summary.AverageMaxCoreUsagePercent >= SingleCoreBoundPercent &&
+            (summary.AverageGpuUsagePercent is null ||
+             summary.AverageGpuUsagePercent < GpuIdleWhileCpuBoundPercent))
+        {
+            var total = summary.AverageCpuUsagePercent is { } t ? $" while total CPU shows only {t:0}%" : "";
+            var game = summary.AverageGameCpuUsagePercent is { } g
+                ? $" The game process alone accounts for {g:0}% of the machine."
+                : "";
+            return new BottleneckAnalysis
+            {
+                Type = BottleneckType.Cpu,
+                Explanation = $"One CPU core averaged {summary.AverageMaxCoreUsagePercent:0}%{total} — " +
+                              $"the game is limited by a single thread.{game} Lowering resolution " +
+                              "will not help; reduce simulation-heavy settings (crowds, draw distance).",
             };
         }
 

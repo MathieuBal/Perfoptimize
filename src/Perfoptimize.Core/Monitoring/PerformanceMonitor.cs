@@ -32,10 +32,15 @@ public sealed class PerformanceMonitor
             $"Telemetry is not supported on {Environment.OSVersion.Platform}.");
     }
 
+    /// <param name="gameProcessId">
+    /// PID of the detected game: readings are then attributed to that process
+    /// and to the GPU adapter it actually renders on.
+    /// </param>
     public async Task<PerformanceReport> CaptureAsync(
         TimeSpan duration,
         TimeSpan? interval = null,
         IProgress<TelemetrySample>? onSample = null,
+        int? gameProcessId = null,
         CancellationToken cancellationToken = default)
     {
         var step = interval ?? TimeSpan.FromSeconds(1);
@@ -44,7 +49,7 @@ public sealed class PerformanceMonitor
 
         // Prime the source: the first CPU reading has no previous measurement
         // to diff against, so it is taken and discarded.
-        _source.Sample();
+        _source.Sample(gameProcessId);
 
         while (DateTimeOffset.Now < deadline && !cancellationToken.IsCancellationRequested)
         {
@@ -56,7 +61,7 @@ public sealed class PerformanceMonitor
             {
                 break;
             }
-            var sample = _source.Sample();
+            var sample = _source.Sample(gameProcessId);
             samples.Add(sample);
             onSample?.Report(sample);
         }
