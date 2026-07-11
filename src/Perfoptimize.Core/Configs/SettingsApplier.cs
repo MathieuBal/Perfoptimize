@@ -7,6 +7,10 @@ public sealed class ApplyResult
     public IReadOnlyList<PlannedChange> Changes { get; init; } = [];
     /// <summary>Backups created before writing, one per modified file.</summary>
     public IReadOnlyList<string> BackupPaths { get; init; } = [];
+    /// <summary>The exact backup created for each modified file in THIS run — the
+    /// only safe rollback target (a later backup could belong to someone else).</summary>
+    public IReadOnlyDictionary<string, string> BackupByFile { get; init; } =
+        new Dictionary<string, string>();
     /// <summary>True when files were written (not a dry run).</summary>
     public bool Written { get; init; }
 }
@@ -30,7 +34,11 @@ public sealed class SettingsApplier
         {
             var path = configFile.ResolvePath();
             if (File.Exists(path))
-                configTexts[path] = File.ReadAllText(path);
+            {
+                // Read with the file's real encoding: a Windows-1252 INI decoded
+                // as UTF-8 would corrupt its accents before the writer even runs.
+                configTexts[path] = File.ReadAllText(path, SafeFileWriter.DetectEncoding(path));
+            }
         }
 
         var changes = SettingsPlanner.Plan(game, settingsToLower, configTexts);
@@ -41,7 +49,7 @@ public sealed class SettingsApplier
         // original encoding. If any file fails midway, every file already
         // written in this run is rolled back from its fresh backup, so the
         // user is never left with a half-applied plan.
-        var backupPaths = new List<string>();
+        var backupByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var written = new List<(string Path, string BackupPath)>();
         try
         {
@@ -51,7 +59,7 @@ public sealed class SettingsApplier
             {
                 var path = fileGroup.Key;
                 var backupPath = _backups.Backup(game.Name, path);
-                backupPaths.Add(backupPath);
+                backupByFile[path] = backupPath;
 
                 var text = configTexts[path];
                 foreach (var change in fileGroup)
@@ -70,7 +78,8 @@ public sealed class SettingsApplier
         return new ApplyResult
         {
             Changes = changes,
-            BackupPaths = backupPaths,
+            BackupPaths = backupByFile.Values.ToList(),
+            BackupByFile = backupByFile,
             Written = true,
         };
     }

@@ -27,9 +27,19 @@ using Perfoptimize.Core.Storage;
 //     --restore                      Restore the most recent backup (game must be closed).
 //   perfoptimize apply <game>        Preview the config edits implementing the
 //                                    recommendations (dry run by default).
-//     --bottleneck gpu|cpu|...       Bottleneck to optimize for (default: last session's).
+//     --session <id>                 Apply exactly the plan stored by that monitor session.
+//     --bottleneck gpu|cpu|...       Bottleneck to optimize for (default: last session's plan).
 //     --goal quality|balanced|performance
 //     --write                        Actually write the files (backup first, game closed).
+//   perfoptimize tune <game>         Guided measured loop (Windows + PresentMon):
+//                                    baseline FPS -> ONE change -> re-measure ->
+//                                    keep it only if the numbers improved.
+//     --baseline/--after <csv>       SIMULATION of the verdict only (nothing written).
+//   perfoptimize tune prepare <game> --baseline <csv>
+//                                    Apply ONE change (game closed, backed up), get an id.
+//   perfoptimize tune finish <id> --after <csv>
+//                                    Verify with a fresh capture: keep or restore.
+//   perfoptimize tune pending        List experiments awaiting verification.
 
 var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "scan";
 
@@ -44,7 +54,8 @@ try
         "history" => RunHistory(args),
         "config" => RunConfig(args),
         "apply" => RunApply(args),
-        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history, config, apply."),
+        "tune" => await RunTuneAsync(args),
+        _ => Fail($"Unknown command \"{command}\". Available: scan, games, monitor, frametimes, history, config, apply, tune."),
     };
 }
 catch (PlatformNotSupportedException ex)
@@ -202,9 +213,12 @@ static async Task<int> RunMonitorAsync(string[] args)
     if (summary.AverageGpuCoreClockMhz is { } clock)
         Console.WriteLine($"GPU clk : avg {clock:0} MHz");
 
-    var analysis = BottleneckDetector.Analyze(summary);
+    var analysis = BottleneckDetector.Analyze(summary, hardware.Cpu.LogicalCores > 0
+        ? hardware.Cpu.LogicalCores
+        : Environment.ProcessorCount);
     Console.WriteLine();
-    Console.WriteLine($"Bottleneck: {analysis.Type}");
+    var confidence = analysis.Confidence == BottleneckConfidence.Suspected ? " (suspected)" : "";
+    Console.WriteLine($"Bottleneck: {analysis.Type}{confidence}");
     Console.WriteLine(analysis.Explanation);
 
     var plan = RecommendationEngine.Advise(new AdviceRequest
@@ -225,8 +239,10 @@ static async Task<int> RunMonitorAsync(string[] args)
             ? $" — +{required:0}% needed"
             : " — target met";
         Console.WriteLine($"FPS: {fps:0.#} measured, {plan.TargetFps} targeted{gap}");
-        if (plan.EstimatedPlanGainPercent is { } estimated)
-            Console.WriteLine($"Estimated gain of this plan: ~+{estimated:0}%");
+        if (plan is { EstimatedGainLowPercent: { } low, EstimatedGainHighPercent: { } high })
+            Console.WriteLine(Math.Abs(high - low) < 0.5
+                ? $"Estimated gain of this plan: ~+{high:0}%"
+                : $"Estimated gain of this plan: +{low:0}% to +{high:0}% (rough)");
     }
     else
     {
@@ -258,9 +274,15 @@ static async Task<int> RunMonitorAsync(string[] args)
             GameName = running?.Profile.Name,
             Bottleneck = analysis.Type,
             Summary = summary,
+            TargetFps = plan.TargetFps,
+            AverageFps = frametimeStats?.AverageFps,
+            OnePercentLowFps = frametimeStats?.OnePercentLowFps,
+            // The exact plan shown above, so 'apply' executes what was advised.
+            Plan = SnapshotPlan(plan, running?.Profile),
         });
         Console.WriteLine();
-        Console.WriteLine($"Session #{id} saved — see \"perfoptimize history\".");
+        Console.WriteLine($"Session #{id} saved — \"perfoptimize apply {running?.Profile.Name ?? "<game>"} " +
+                          $"--session {id}\" applies exactly this plan.");
     }
     catch (Exception ex)
     {
@@ -414,7 +436,8 @@ static int RunApply(string[] args)
     var query = args.SkipWhile(a => a != "apply").Skip(1)
         .FirstOrDefault(a => !a.StartsWith('-'));
     if (query is null)
-        return Fail("Usage: perfoptimize apply <game> [--bottleneck gpu|cpu|vram|ram|thermal] " +
+        return Fail("Usage: perfoptimize apply <game> [--session <id>] " +
+                    "[--bottleneck gpu|cpu|vram|ram|thermal] " +
                     "[--goal quality|balanced|performance] [--write]");
 
     var profiles = GameProfileRepository.LoadBuiltIn();
@@ -430,14 +453,43 @@ static int RunApply(string[] args)
         !Enum.TryParse(args[goalIndex + 1], ignoreCase: true, out goal))
         return Fail($"Unknown goal \"{args[goalIndex + 1]}\". Available: quality, balanced, performance.");
 
-    // The bottleneck to optimize for: explicit flag, or the last recorded session for this game.
-    BottleneckType bottleneck;
+    // Preferred path: apply exactly the plan a monitoring session produced —
+    // same settings the user saw, not a fresh computation from partial context.
+    List<GameSetting>? settingsToLower = null;
+    string planOrigin;
+    var sessionIndex = Array.IndexOf(args, "--session");
     var bottleneckIndex = Array.IndexOf(args, "--bottleneck");
-    if (bottleneckIndex >= 0)
+    BottleneckType bottleneck = BottleneckType.Unknown;
+
+    if (sessionIndex >= 0)
+    {
+        if (sessionIndex + 1 >= args.Length || !long.TryParse(args[sessionIndex + 1], out var sessionId))
+            return Fail("Usage: --session <id> (see \"perfoptimize history\")");
+        using var store = new SessionStore(SessionStore.DefaultDatabasePath());
+        var session = store.GetById(sessionId);
+        if (session is null)
+            return Fail($"Session #{sessionId} does not exist.");
+        // A Cyberpunk plan must never land in The Witcher's config files, even
+        // when both games name a setting "Texture Quality".
+        if (!string.Equals(session.GameName, game.Name, StringComparison.OrdinalIgnoreCase))
+            return Fail($"Session #{sessionId} belongs to {session.GameName ?? "a system-wide analysis"}, " +
+                        $"not {game.Name}.");
+        if (session.Plan.Count == 0)
+            return Fail($"Session #{sessionId} has no stored plan (it predates plan storage or " +
+                        "produced no recommendations).");
+        settingsToLower = MatchPlanSettings(game, session.Plan);
+        bottleneck = session.Bottleneck;
+        planOrigin = $"plan of session #{sessionId}";
+        if (settingsToLower.Count == 0)
+            return Fail($"No setting of session #{sessionId}'s plan is bound to a config file " +
+                        "— those changes must be made in the game's menu.");
+    }
+    else if (bottleneckIndex >= 0)
     {
         if (bottleneckIndex + 1 >= args.Length ||
             !Enum.TryParse(args[bottleneckIndex + 1], ignoreCase: true, out bottleneck))
             return Fail("Usage: --bottleneck gpu|cpu|vram|ram|thermal");
+        planOrigin = $"{bottleneck} bottleneck (explicit)";
     }
     else
     {
@@ -447,30 +499,41 @@ static int RunApply(string[] args)
             return Fail($"No recorded session for {game.Name}. Run \"perfoptimize monitor\" while " +
                         "playing first, or pass --bottleneck explicitly.");
         bottleneck = lastSession.Bottleneck;
-        Console.WriteLine($"Using the bottleneck of session #{lastSession.Id} " +
-                          $"({lastSession.StartedAt:yyyy-MM-dd HH:mm}): {bottleneck}");
+        if (lastSession.Plan.Count > 0)
+        {
+            settingsToLower = MatchPlanSettings(game, lastSession.Plan);
+            planOrigin = $"plan of session #{lastSession.Id} ({lastSession.StartedAt:yyyy-MM-dd HH:mm})";
+        }
+        else
+        {
+            planOrigin = $"bottleneck of session #{lastSession.Id}: {bottleneck}";
+        }
+        Console.WriteLine($"Using the {planOrigin}.");
     }
+
+    if (settingsToLower is null or { Count: 0 })
+    {
+        var recommendations = RecommendationEngine.Recommend(
+            new BottleneckAnalysis { Type = bottleneck }, game, goal);
+        settingsToLower = recommendations
+            .Where(r => r.Setting is not null)
+            .Select(r => r.Setting!)
+            .ToList();
+    }
+    if (settingsToLower.Count == 0)
+        return Fail($"No {game.Name} setting targets a {bottleneck} bottleneck.");
 
     var write = args.Contains("--write");
     if (write && new RunningGameDetector().Detect([game]) is { } running)
         return Fail($"{game.Name} is running (pid {running.ProcessId}) — close it before writing its config.");
-
-    var recommendations = RecommendationEngine.Recommend(
-        new BottleneckAnalysis { Type = bottleneck }, game, goal);
-    var settingsToLower = recommendations
-        .Where(r => r.Setting is not null)
-        .Select(r => r.Setting!)
-        .ToList();
-    if (settingsToLower.Count == 0)
-        return Fail($"No {game.Name} setting targets a {bottleneck} bottleneck.");
 
     var applier = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
     var result = applier.Apply(game, settingsToLower, write);
 
     Console.WriteLine();
     Console.WriteLine(result.Written
-        ? $"Applied config changes for {game.Name} ({goal} goal, {bottleneck} bottleneck):"
-        : $"Planned config changes for {game.Name} ({goal} goal, {bottleneck} bottleneck) — dry run:");
+        ? $"Applied config changes for {game.Name} ({planOrigin}):"
+        : $"Planned config changes for {game.Name} ({planOrigin}) — dry run:");
     foreach (var change in result.Changes)
     {
         var marker = change.Status == PlannedChangeStatus.Ready ? (result.Written ? "APPLIED" : "READY") : change.Status.ToString();
@@ -490,6 +553,404 @@ static int RunApply(string[] args)
         Console.WriteLine("Nothing was written. Re-run with --write to apply (a backup is taken first).");
     }
     return 0;
+}
+
+/// <summary>
+/// Turns the advised plan into stored recommendations, snapshotting the exact
+/// config edit (file, section, key, observed and proposed values) for every
+/// bound setting — so a later 'apply --session' replays precisely this plan.
+/// </summary>
+static List<StoredRecommendation> SnapshotPlan(AdvicePlan plan, GameProfile? game)
+{
+    Dictionary<string, PlannedChange>? plannedBySetting = null;
+    if (game is not null)
+    {
+        var boundSettings = plan.Recommendations
+            .Where(r => r.Setting?.Config is not null)
+            .Select(r => r.Setting!)
+            .ToList();
+        if (boundSettings.Count > 0)
+        {
+            var dryRun = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()))
+                .Apply(game, boundSettings, write: false);
+            plannedBySetting = dryRun.Changes
+                .Where(c => c.Status == PlannedChangeStatus.Ready)
+                .ToDictionary(c => c.Setting.Name, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    return plan.Recommendations.Select(r =>
+    {
+        PlannedChange? change = null;
+        if (r.Setting is not null && plannedBySetting is not null)
+            plannedBySetting.TryGetValue(r.Setting.Name, out change);
+        return new StoredRecommendation
+        {
+            Title = r.Title,
+            Reason = r.Reason,
+            SettingName = r.Setting?.Name,
+            ExpectedGainPercent = r.ExpectedGainPercent,
+            ConfigFile = change is not null ? r.Setting!.Config!.File : null,
+            ConfigSection = change is not null ? r.Setting!.Config!.Section : null,
+            ConfigKey = change is not null ? r.Setting!.Config!.Key : null,
+            ObservedValue = change?.CurrentValue,
+            ProposedValue = change?.NewValue,
+        };
+    }).ToList();
+}
+
+/// <summary>Maps a stored session plan back to the profile's setting objects.
+/// Exact snapshots (file/key/values) win; name matching is the legacy fallback.</summary>
+static List<GameSetting> MatchPlanSettings(GameProfile game, IReadOnlyList<StoredRecommendation> plan)
+{
+    return plan
+        .Where(r => r.SettingName is not null)
+        .Select(r => r.ToExactSetting() ?? game.Settings.FirstOrDefault(s =>
+            s.Name.Equals(r.SettingName, StringComparison.OrdinalIgnoreCase)))
+        .Where(s => s is not null)
+        .Select(s => s!)
+        .ToList();
+}
+
+static async Task<int> RunTuneAsync(string[] args)
+{
+    var positionals = args.SkipWhile(a => a != "tune").Skip(1)
+        .Where(a => !a.StartsWith('-')).Take(3).ToArray();
+    var subcommand = positionals.FirstOrDefault();
+
+    return subcommand switch
+    {
+        "prepare" => await RunTunePrepareAsync(args, positionals.Skip(1).FirstOrDefault()),
+        "finish" => RunTuneFinish(args, positionals.Skip(1).FirstOrDefault()),
+        "pending" => RunTunePending(),
+        null => Fail(TuneUsage()),
+        _ => await RunTuneOneShotAsync(args, subcommand),
+    };
+}
+
+static string TuneUsage() =>
+    """
+    Usage:
+      perfoptimize tune <game> [--bottleneck ...|--session <id>]   Guided loop (Windows + PresentMon)
+      perfoptimize tune <game> --baseline a.csv --after b.csv      SIMULATION only (nothing is written)
+      perfoptimize tune prepare <game> --baseline a.csv            Apply ONE change (game closed), get an id
+      perfoptimize tune finish <id> --after b.csv                  Compare, then keep or restore
+      perfoptimize tune pending                                    List experiments awaiting 'finish'
+    """;
+
+/// <summary>Resolves which bottleneck to tune for: --session, then the game's
+/// last recorded session, then an explicit --bottleneck. Never a silent default.</summary>
+static BottleneckType? ResolveTuneBottleneck(string[] args, GameProfile game, out string origin)
+{
+    origin = "";
+    var sessionIndex = Array.IndexOf(args, "--session");
+    if (sessionIndex >= 0 && sessionIndex + 1 < args.Length &&
+        long.TryParse(args[sessionIndex + 1], out var sessionId))
+    {
+        using var store = new SessionStore(SessionStore.DefaultDatabasePath());
+        var session = store.GetById(sessionId);
+        if (session is null ||
+            !string.Equals(session.GameName, game.Name, StringComparison.OrdinalIgnoreCase))
+            return null;
+        origin = $"session #{sessionId}";
+        return session.Bottleneck;
+    }
+
+    var bottleneckIndex = Array.IndexOf(args, "--bottleneck");
+    if (bottleneckIndex >= 0 && bottleneckIndex + 1 < args.Length &&
+        Enum.TryParse<BottleneckType>(args[bottleneckIndex + 1], ignoreCase: true, out var explicitType))
+    {
+        origin = "explicit --bottleneck";
+        return explicitType;
+    }
+
+    using var history = new SessionStore(SessionStore.DefaultDatabasePath());
+    var last = history.GetRecent(limit: 1, game.Name).FirstOrDefault();
+    if (last is not null)
+    {
+        origin = $"last session #{last.Id} ({last.StartedAt:yyyy-MM-dd HH:mm})";
+        return last.Bottleneck;
+    }
+    return null;
+}
+
+/// <summary>Picks the config-bound setting to test for the given bottleneck.</summary>
+static GameSetting? PickTuneSetting(GameProfile game, BottleneckType bottleneck, FrametimeStatistics? baseline, string[] args)
+{
+    var goal = OptimizationGoal.Balanced;
+    var goalIndex = Array.IndexOf(args, "--goal");
+    if (goalIndex >= 0 && goalIndex + 1 < args.Length)
+        Enum.TryParse(args[goalIndex + 1], ignoreCase: true, out goal);
+
+    var plan = RecommendationEngine.Advise(new AdviceRequest
+    {
+        Analysis = new BottleneckAnalysis { Type = bottleneck },
+        Game = game,
+        Goal = goal,
+        Frametimes = baseline,
+        TargetFps = ArgValue(args, "--target-fps") is { } t && int.TryParse(t, out var parsed) ? parsed : null,
+    });
+
+    var relevantImpacts = bottleneck switch
+    {
+        BottleneckType.Cpu => new[] { SettingImpact.Cpu, SettingImpact.Mixed },
+        BottleneckType.Vram => [SettingImpact.Vram],
+        BottleneckType.Ram => [SettingImpact.Ram, SettingImpact.Vram],
+        _ => [SettingImpact.Gpu, SettingImpact.Mixed],
+    };
+    return plan.Recommendations
+               .Select(r => r.Setting)
+               .FirstOrDefault(s => s?.Config is not null)
+           ?? game.Settings
+               .Where(s => s.Config is not null && relevantImpacts.Contains(s.Impact))
+               .OrderByDescending(s => s.PerformanceGain - s.QualityLoss)
+               .FirstOrDefault();
+}
+
+static FrametimeStatistics? ReadCapture(string path) =>
+    File.Exists(path)
+        ? FrametimeAnalyzer.Analyze(PresentMonCsv.ReadFrametimes(File.ReadAllText(path)))
+        : null;
+
+static (GameProfile? Game, int ExitCode) FindGameOrFail(string query)
+{
+    var profiles = GameProfileRepository.LoadBuiltIn();
+    var game = profiles.FirstOrDefault(p =>
+                   p.Name.Contains(query, StringComparison.OrdinalIgnoreCase)) ??
+               RunningGameDetector.Match(query, profiles);
+    if (game is null)
+        return (null, Fail($"No known game matches \"{query}\". See \"perfoptimize games\"."));
+    return (game, 0);
+}
+
+/// <summary>Single-command mode: simulation with two CSVs, or the guided
+/// PresentMon loop on Windows. Nothing here writes without the game closed.</summary>
+static async Task<int> RunTuneOneShotAsync(string[] args, string query)
+{
+    var (game, exitCode) = FindGameOrFail(query);
+    if (game is null)
+        return exitCode;
+
+    var bottleneck = ResolveTuneBottleneck(args, game, out var origin);
+    if (bottleneck is null)
+        return Fail($"No recorded session for {game.Name} and no --bottleneck given. " +
+                    "Run \"perfoptimize monitor\" while playing first, or pass --bottleneck explicitly.");
+    Console.WriteLine($"Tuning for the {bottleneck} bottleneck ({origin}).");
+
+    var baselineCsv = ArgValue(args, "--baseline");
+    var afterCsv = ArgValue(args, "--after");
+
+    // Two pre-existing captures cannot prove anything about a change applied
+    // NOW — so this mode only simulates the keep/restore decision.
+    if (baselineCsv is not null || afterCsv is not null)
+    {
+        if (baselineCsv is null || afterCsv is null)
+            return Fail("Simulation needs both --baseline <csv> and --after <csv>.");
+        var baseline = ReadCapture(baselineCsv);
+        var after = ReadCapture(afterCsv);
+        if (baseline is null || after is null)
+            return Fail("Could not read frame times from the provided captures.");
+
+        var decision = OptimizationLoop.Decide(baseline, after);
+        Console.WriteLine();
+        Console.WriteLine("SIMULATION — no file was read from or written to the game.");
+        Console.WriteLine($"Baseline : {baseline.AverageFps:0.#} FPS avg, {baseline.OnePercentLowFps:0.#} 1% low, {baseline.StutterPercent:0.##}% stutter");
+        Console.WriteLine($"After    : {after.AverageFps:0.#} FPS avg, {after.OnePercentLowFps:0.#} 1% low, {after.StutterPercent:0.##}% stutter");
+        Console.WriteLine(decision.Verdict);
+        Console.WriteLine();
+        Console.WriteLine("To run a real measured experiment, use \"perfoptimize tune prepare\" / \"tune finish\".");
+        return 0;
+    }
+
+    // Guided live loop: measure, close, apply, relaunch, re-measure.
+    if (!OperatingSystem.IsWindows() || PresentMonCapture.FindExecutable() is null)
+        return Fail("The guided loop needs PresentMon (Windows). Elsewhere, capture two PresentMon " +
+                    "CSVs and use \"tune prepare --baseline\" then \"tune finish --after\".");
+
+    var running = new RunningGameDetector().Detect([game]);
+    if (running is null)
+        return Fail($"{game.Name} is not running — start it and stay in a repeatable scene.");
+    Console.WriteLine("Measuring baseline for 30s — keep playing the same scene...");
+    var liveBaseline = OperatingSystem.IsWindows()
+        ? await PresentMonCapture.CaptureAsync(running.ProcessId, TimeSpan.FromSeconds(30))
+        : null;
+    if (liveBaseline is null)
+        return Fail("Baseline measurement failed (no frames captured).");
+    Console.WriteLine($"Baseline: {liveBaseline.AverageFps:0.#} FPS average, " +
+                      $"{liveBaseline.OnePercentLowFps:0.#} FPS 1% low.");
+
+    var setting = PickTuneSetting(game, bottleneck.Value, liveBaseline, args);
+    if (setting is null)
+        return Fail($"No {game.Name} setting relevant to a {bottleneck} bottleneck is bound to a " +
+                    "config file yet — those changes must be made in the game's menu.");
+    Console.WriteLine($"Testing ONE change: lower \"{setting.Name}\" by one step.");
+
+    Console.WriteLine("Close the game now, then press Enter to apply the change...");
+    Console.ReadLine();
+    if (new RunningGameDetector().Detect([game]) is { } stillRunning)
+        return Fail($"{game.Name} is still running (pid {stillRunning.ProcessId}).");
+
+    var loop = new OptimizationLoop(
+        new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot())));
+    var outcome = await loop.RunOnceAsync(game, setting, liveBaseline, async () =>
+    {
+        if (!OperatingSystem.IsWindows())
+            return null;
+        Console.WriteLine("Change applied. Relaunch the game, return to the SAME scene, " +
+                          "then press Enter to re-measure...");
+        Console.ReadLine();
+        var relaunched = new RunningGameDetector().Detect([game]);
+        if (relaunched is null)
+            return null;
+        Console.WriteLine("Re-measuring for 30s...");
+        return await PresentMonCapture.CaptureAsync(relaunched.ProcessId, TimeSpan.FromSeconds(30));
+    });
+
+    if (outcome is null)
+        return Fail($"\"{setting.Name}\" could not be applied (value outside the documented ladder, " +
+                    "or config file missing) — nothing was changed.");
+    PrintTuneOutcome(outcome);
+    return 0;
+}
+
+/// <summary>Phase 1: apply ONE change (game closed, backed up) and persist the
+/// experiment so 'tune finish' can verify it with a fresh capture.</summary>
+static async Task<int> RunTunePrepareAsync(string[] args, string? query)
+{
+    if (query is null)
+        return Fail(TuneUsage());
+    var (game, exitCode) = FindGameOrFail(query);
+    if (game is null)
+        return exitCode;
+
+    var bottleneck = ResolveTuneBottleneck(args, game, out var origin);
+    if (bottleneck is null)
+        return Fail($"No recorded session for {game.Name} and no --bottleneck given. " +
+                    "Run \"perfoptimize monitor\" while playing first, or pass --bottleneck explicitly.");
+
+    // Baseline: a CSV captured just before closing the game, or live PresentMon.
+    FrametimeStatistics? baseline = null;
+    if (ArgValue(args, "--baseline") is { } baselineCsv)
+    {
+        baseline = ReadCapture(baselineCsv);
+        if (baseline is null)
+            return Fail($"Could not read frame times from {baselineCsv}.");
+    }
+    else if (OperatingSystem.IsWindows() && PresentMonCapture.FindExecutable() is not null &&
+             new RunningGameDetector().Detect([game]) is { } running)
+    {
+        Console.WriteLine("Measuring baseline for 30s — keep playing the same scene...");
+        baseline = await PresentMonCapture.CaptureAsync(running.ProcessId, TimeSpan.FromSeconds(30));
+    }
+    if (baseline is null)
+        return Fail("A baseline is required: pass --baseline <presentmon.csv> " +
+                    "(captured in the scene you will re-test) or run with PresentMon on Windows.");
+
+    // The write requires the game to be closed — no exception, ever.
+    if (new RunningGameDetector().Detect([game]) is { } open)
+        return Fail($"{game.Name} is running (pid {open.ProcessId}) — close it before applying the change.");
+
+    var setting = PickTuneSetting(game, bottleneck.Value, baseline, args);
+    if (setting is null)
+        return Fail($"No {game.Name} setting relevant to a {bottleneck} bottleneck is bound to a " +
+                    "config file yet — those changes must be made in the game's menu.");
+
+    var applier = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
+    var applyResult = applier.Apply(game, [setting], write: true);
+    var change = applyResult.Changes.FirstOrDefault(c => c.Status == PlannedChangeStatus.Ready);
+    if (change is null || !applyResult.Written)
+        return Fail($"\"{setting.Name}\" could not be applied (value outside the documented ladder, " +
+                    "or config file missing) — nothing was changed.");
+
+    var pending = new TuningStateStore(TuningStateStore.DefaultDirectory()).Create(
+        game.Name, setting.Name, change.Note, baseline, applyResult.BackupByFile);
+
+    Console.WriteLine($"Applied: {change.Note} (backup taken, bottleneck from {origin}).");
+    Console.WriteLine($"Baseline: {baseline.AverageFps:0.#} FPS avg, {baseline.OnePercentLowFps:0.#} 1% low.");
+    Console.WriteLine();
+    Console.WriteLine($"Now relaunch the game, return to the SAME scene, capture ~30s with PresentMon, then run:");
+    Console.WriteLine($"  perfoptimize tune finish {pending.Id} --after <capture.csv>");
+    return 0;
+}
+
+/// <summary>Phase 2: verify the applied change with the fresh capture, then
+/// keep it or restore the exact backups taken at prepare time.</summary>
+static int RunTuneFinish(string[] args, string? id)
+{
+    if (id is null)
+        return Fail(TuneUsage());
+    var store = new TuningStateStore(TuningStateStore.DefaultDirectory());
+    var pending = store.Load(id);
+    if (pending is null)
+        return Fail($"No pending tuning experiment \"{id}\". See \"perfoptimize tune pending\".");
+
+    if (ArgValue(args, "--after") is not { } afterCsv)
+        return Fail($"Usage: perfoptimize tune finish {id} --after <presentmon.csv>");
+    var after = ReadCapture(afterCsv);
+    if (after is null)
+        return Fail($"Could not read frame times from {afterCsv}. The change stays applied; " +
+                    $"re-run finish with a valid capture, or restore with \"perfoptimize config " +
+                    $"{pending.GameName} --restore\".");
+
+    var decision = OptimizationLoop.Decide(pending.Baseline, after);
+    Console.WriteLine($"Experiment {pending.Id} — {pending.GameName}: {pending.ChangeDescription}");
+    Console.WriteLine($"Before : {pending.Baseline.AverageFps:0.#} FPS avg, {pending.Baseline.OnePercentLowFps:0.#} 1% low");
+    Console.WriteLine($"After  : {after.AverageFps:0.#} FPS avg, {after.OnePercentLowFps:0.#} 1% low");
+    Console.WriteLine(decision.Verdict);
+
+    if (!decision.Keep)
+    {
+        // Restoring writes the config: the game must be closed here too.
+        var profiles = GameProfileRepository.LoadBuiltIn();
+        var game = profiles.FirstOrDefault(p =>
+            p.Name.Equals(pending.GameName, StringComparison.OrdinalIgnoreCase));
+        if (game is not null && new RunningGameDetector().Detect([game]) is { } running)
+            return Fail($"{pending.GameName} is running (pid {running.ProcessId}) — close it and " +
+                        $"re-run \"perfoptimize tune finish {id} --after ...\" to restore.");
+
+        foreach (var (path, backupPath) in pending.BackupByFile)
+        {
+            if (File.Exists(backupPath))
+                File.Copy(backupPath, path, overwrite: true);
+        }
+        Console.WriteLine("Your previous settings are back in place.");
+    }
+
+    store.Delete(pending.Id);
+    return 0;
+}
+
+static int RunTunePending()
+{
+    var pending = new TuningStateStore(TuningStateStore.DefaultDirectory()).ListPending();
+    if (pending.Count == 0)
+    {
+        Console.WriteLine("No tuning experiment awaiting verification.");
+        return 0;
+    }
+    Console.WriteLine($"{pending.Count} experiment(s) awaiting \"tune finish\":");
+    foreach (var experiment in pending)
+    {
+        Console.WriteLine($"- {experiment.Id} — {experiment.GameName}: {experiment.ChangeDescription} " +
+                          $"(baseline {experiment.Baseline.AverageFps:0.#} FPS, {experiment.CreatedAt:yyyy-MM-dd HH:mm})");
+    }
+    return 0;
+}
+
+static void PrintTuneOutcome(TuneOutcome outcome)
+{
+    Console.WriteLine();
+    Console.WriteLine($"Before : {outcome.Baseline.AverageFps:0.#} FPS avg, {outcome.Baseline.OnePercentLowFps:0.#} 1% low");
+    Console.WriteLine($"After  : {outcome.After.AverageFps:0.#} FPS avg, {outcome.After.OnePercentLowFps:0.#} 1% low");
+    Console.WriteLine(outcome.Verdict);
+    if (!outcome.Kept)
+        Console.WriteLine("Your previous settings are back in place.");
+}
+
+static string? ArgValue(string[] args, string flag)
+{
+    var index = Array.IndexOf(args, flag);
+    return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
 }
 
 static string Percent(double? value) => value is { } v ? $"{v:0}%" : "n/a";

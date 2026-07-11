@@ -18,6 +18,8 @@ de réglages graphiques.
 - ✅ **Étape 10 — conseiller contextuel** (objectif FPS, matériel réel, spécificités du jeu)
 - ✅ **Étape 11 — pipeline de mesure v2** (attribution au processus du jeu, charge par cœur,
   throttling confirmé par le pilote, PresentMon intégré à `monitor`)
+- ✅ **Étape 12 — diagnostic v3 et boucle mesurée** (attribution utilisée dans les verdicts,
+  contention GPU externe, confiance, plan de session appliqué à l'identique, `tune`)
 
 ### Étape 1 : détection matérielle
 
@@ -45,7 +47,8 @@ dotnet run --project src/Perfoptimize.Cli -- config witcher              # local
 dotnet run --project src/Perfoptimize.Cli -- config witcher --backup     # sauvegarde horodatée
 dotnet run --project src/Perfoptimize.Cli -- config witcher --restore    # restaurer (jeu fermé uniquement)
 dotnet run --project src/Perfoptimize.Cli -- apply witcher               # prévisualiser les modifications
-dotnet run --project src/Perfoptimize.Cli -- apply witcher --bottleneck gpu --write   # appliquer
+dotnet run --project src/Perfoptimize.Cli -- apply witcher --session 3 --write   # appliquer le plan de la session 3
+dotnet run --project src/Perfoptimize.Cli -- tune witcher                # boucle mesurée : 1 changement, vérifié
 ```
 
 Exemple de session `monitor` :
@@ -152,6 +155,68 @@ pipeline attribue donc les mesures au processus détecté :
   `PERFOPTIMIZE_PRESENTMON`), `monitor` capture automatiquement les vrais
   frametimes du jeu pendant la session — plus besoin de la manœuvre manuelle
   en deux commandes.
+
+### Diagnostic v3 : des verdicts qui disent leur degré de certitude
+
+- **L'attribution sert au verdict, pas seulement à l'affichage** : jeu ≥ 90 %
+  du GPU → limité GPU *confirmé* ; adaptateur saturé mais jeu ≤ 70 % →
+  **`ExternalGpuLoad`** (navigateur, OBS…) ; attribution absente → verdict
+  *suspecté*, dit comme tel. Côté CPU, l'attribution s'applique au cœur saturé
+  **et** à la saturation globale : si la charge n'appartient pas au jeu, le
+  verdict est **`ExternalCpuLoad`**. Ces verdicts externes — comme
+  **`GpuHardwareLimit`** — ne produisent **jamais** de modification de
+  réglages du jeu : fermer le programme responsable, vérifier
+  câbles/alimentation, re-analyser.
+- **Causes de ralentissement séparées** : bits thermiques du pilote
+  (`SwThermalSlowdown`, `HwThermalSlowdown`) → throttling **confirmé** ;
+  `HwSlowdown`/`HwPowerBrake` → **`GpuHardwareLimit`** (limite carte ou
+  alimentation, pas un problème de réglages) ; température seule → suspicion
+  explicite.
+- **Gains affichés en fourchette** (`+25 % à +46 %`) : les gains estimés
+  interagissent et ne s'additionnent pas linéairement — le plan le dit et
+  invite à re-mesurer.
+- **Sélection à coût visuel minimal** : pour combler +5 %, le moteur choisit
+  le brouillard volumétrique (gain 8 %, coût visuel 1) plutôt que le ray
+  tracing (gain 30 %, coût 3) — recherche du sous-ensemble couvrant l'écart
+  avec le minimum de perte visuelle.
+- **Frame Generation refusée sous ~45 FPS réels** (latence et artefacts), et
+  capacité FSR-FG restreinte aux cartes réellement modernes (RTX, RX 5000+,
+  Arc). L'objectif FPS est aussi plafonné à la fréquence de l'écran.
+
+### Boucle d'optimisation mesurée (`tune`)
+
+Le cœur du produit : ne plus estimer, **vérifier**. Le workflow réel est en
+deux phases, pour que la seconde capture soit forcément produite *après* le
+changement :
+
+```text
+perfoptimize tune prepare witcher --baseline scene.csv
+→ vérifie que le jeu est fermé, applique UN changement (HairWorks 2 → 1),
+  sauvegarde, et crée l'expérience 20260711-193106
+
+(l'utilisateur relance le jeu, rejoue la même scène, capture ~30 s)
+
+perfoptimize tune finish 20260711-193106 --after capture.csv
+→ Before 48,1 FPS / After 56,2 FPS : +16,8 % mesuré → conservé
+  (ou +0,8 % → restauration automatique depuis la sauvegarde exacte)
+```
+
+Règles de conservation : gain moyen ≥ 3 % **ou** 1% low ≥ +8 %, mais toute
+régression sérieuse est bloquante — moyenne < −1 %, **1% low < −5 % ou stutter
+en hausse** font restaurer même si la moyenne progresse. Une seconde mesure
+impossible (fichier illisible, exception, annulation) = restauration
+systématique, garantie par `try/finally` et par la **sauvegarde exacte de
+l'expérience** (jamais « la dernière sauvegarde », qui pourrait appartenir à
+une autre opération). Sous Windows, `tune <jeu>` reste un mode guidé en une
+commande (PresentMon piloté) ; `tune <jeu> --baseline/--after` est une
+**simulation** qui n'écrit rien ; `tune pending` liste les expériences en
+attente.
+
+Chaque session `monitor` enregistre en plus son **plan exact** — y compris,
+pour chaque réglage lié, le fichier, la section, la clé, la **valeur observée
+et la valeur proposée**. `apply <jeu> --session <id>` refuse une session d'un
+autre jeu, applique précisément ces valeurs, et laisse intacte toute clé dont
+la valeur a changé depuis la session (le plan ne décrit plus la réalité).
 
 ### Conseiller contextuel
 
@@ -295,15 +360,18 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
 - **La température CPU Windows** (`MSAcpi_ThermalZoneTemperature`) peut
   refléter le chipset plutôt que le CPU — elle n'est utilisée que comme
   suspicion, jamais comme preuve ;
+- **Les fichiers de config sans BOM ni octets invalides** sont supposés UTF-8 ;
+  seul un contenu réellement invalide en UTF-8 déclenche le repli Latin-1 ;
 - **Les gains estimés des profils sont déclaratifs** (ordres de grandeur des
   benchmarks publics), en attendant la boucle mesure → application →
   re-mesure qui les calibrera sur la machine de l'utilisateur.
 
 ### Prochaines étapes
 
-1. **Boucle d'optimisation mesurée** : référence 60 s → un seul changement →
-   re-mesure dans la même scène → comparaison avant/après → conservation ou
-   restauration automatique ;
-2. Écriture JSON/XML (Cyberpunk 2077, GTA V) et lecture des réglages actuels ;
-3. Détection d'écrans via les API d'affichage Windows ;
-4. Interface graphique (WPF/WinUI), après fiabilisation du diagnostic.
+1. Validation sur plusieurs vraies machines Windows (compteurs GPU réels,
+   PresentMon, multi-GPU) ;
+2. Correspondance LUID → capacité VRAM par adaptateur (aujourd'hui le
+   dénominateur VRAM vient du GPU « principal » supposé) ;
+3. Écriture JSON/XML (Cyberpunk 2077, GTA V) et lecture des réglages actuels ;
+4. Détection d'écrans via les API d'affichage Windows ;
+5. Interface graphique (WPF/WinUI), après validation du diagnostic.

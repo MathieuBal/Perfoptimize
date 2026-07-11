@@ -46,6 +46,7 @@ public sealed class LinuxTelemetrySource : ISystemTelemetrySource
             GpuTemperatureC = gpu?.TemperatureC,
             GpuCoreClockMhz = gpu?.CoreClockMhz,
             GpuThermalThrottleActive = gpu?.ThermalThrottleActive,
+            GpuHardwareSlowdownActive = gpu?.HardwareSlowdownActive,
             CpuTemperatureC = ReadCpuTemperature(),
         };
     }

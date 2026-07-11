@@ -38,6 +38,7 @@ public sealed class WindowsTelemetrySource : ISystemTelemetrySource
             GpuTemperatureC = nvidia?.TemperatureC,
             GpuCoreClockMhz = nvidia?.CoreClockMhz,
             GpuThermalThrottleActive = nvidia?.ThermalThrottleActive,
+            GpuHardwareSlowdownActive = nvidia?.HardwareSlowdownActive,
             CpuTemperatureC = SampleCpuTemperature(),
         };
     }

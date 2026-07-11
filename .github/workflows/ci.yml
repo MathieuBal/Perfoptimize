@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        # ubuntu runs the cross-platform logic; windows compiles and runs the
+        # same suite against the real .NET Windows stack (WMI code paths are
+        # platform-guarded, so tests are identical).
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore
+        run: dotnet restore Perfoptimize.sln
+      - name: Build
+        run: dotnet build Perfoptimize.sln --no-restore --configuration Release
+      - name: Test
+        run: dotnet test Perfoptimize.sln --no-build --configuration Release --verbosity normal

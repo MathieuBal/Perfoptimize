@@ -47,8 +47,10 @@ public sealed class AdvicePlan
     public double? MeasuredAverageFps { get; init; }
     /// <summary>FPS gain (percent) needed to reach the target; null without FPS data.</summary>
     public double? RequiredGainPercent { get; init; }
-    /// <summary>Sum of the quantified gains of the recommendations below.</summary>
-    public double? EstimatedPlanGainPercent { get; init; }
+    /// <summary>Conservative end of the plan's estimated gain (gains do not stack linearly).</summary>
+    public double? EstimatedGainLowPercent { get; init; }
+    /// <summary>Optimistic ceiling of the plan's estimated gain (simple sum).</summary>
+    public double? EstimatedGainHighPercent { get; init; }
     public IReadOnlyList<Recommendation> Recommendations { get; init; } = [];
     /// <summary>Context the player should know (frame caps, out-of-reach targets, ...).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
@@ -66,6 +68,8 @@ public static class RecommendationEngine
     private const int PercentPerGainPoint = 3;
     /// <summary>VRAM kept free for the OS, overlays and capture tools (GiB).</summary>
     private const double VramOverheadGiB = 0.8;
+    /// <summary>Below this measured FPS, frame generation feels laggy and must not be advised.</summary>
+    private const double MinimumFrameGenBaseFps = 45;
 
     /// <summary>Compatibility facade over <see cref="Advise"/> for context-free callers.</summary>
     public static IReadOnlyList<Recommendation> Recommend(
@@ -89,6 +93,12 @@ public static class RecommendationEngine
                       $"targeting {targetFps} FPS is pointless, so the target was lowered to {cap}.");
             targetFps = cap;
         }
+        if (PrimaryDisplayRefresh(request.Hardware) is { } refresh && targetFps > refresh)
+        {
+            notes.Add($"Your display refreshes at {refresh} Hz — frames beyond that are never shown, " +
+                      $"so the target was lowered from {targetFps} to {refresh} FPS.");
+            targetFps = refresh;
+        }
 
         var measuredFps = request.Frametimes?.AverageFps;
         double? requiredGain = measuredFps is > 0
@@ -111,15 +121,15 @@ public static class RecommendationEngine
 
         // 5. Frame generation can rescue CPU-bound games — with a latency caveat.
         if (request.Analysis.Type == BottleneckType.Cpu)
-            recommendations.AddRange(FrameGenerationAdvice(request));
+            recommendations.AddRange(FrameGenerationAdvice(request, measuredFps, notes));
 
         // 6. Generic advice for whatever the specific paths did not cover.
         recommendations.AddRange(GenericAdvice(request, measuredFps));
 
-        var estimated = recommendations.Sum(r => r.ExpectedGainPercent ?? 0);
-        if (requiredGain is { } needed && needed > 0 && estimated > 0 && estimated < needed * 0.8)
+        var optimistic = recommendations.Sum(r => r.ExpectedGainPercent ?? 0);
+        if (requiredGain is { } needed && needed > 0 && optimistic > 0 && optimistic < needed * 0.8)
         {
-            notes.Add($"Even with every change applied (~+{estimated:0}%), reaching {targetFps} FPS " +
+            notes.Add($"Even with every change applied (up to ~+{optimistic:0}%), reaching {targetFps} FPS " +
                       $"(+{needed:0}% needed) looks out of reach — consider lowering the target, " +
                       "the resolution, or upgrading the limiting component.");
         }
@@ -131,13 +141,30 @@ public static class RecommendationEngine
         int targetFps, double? measuredFps, double? requiredGain,
         List<Recommendation> recommendations, List<string> notes)
     {
-        var estimated = recommendations.Sum(r => r.ExpectedGainPercent ?? 0);
+        // Individual estimates interact (relieving the GPU changes what the next
+        // setting can gain), so a sum is an optimistic ceiling. Report a range
+        // instead of a falsely precise single number.
+        var quantified = recommendations
+            .Where(r => r.ExpectedGainPercent is > 0)
+            .Select(r => r.ExpectedGainPercent!.Value)
+            .ToList();
+        double? high = quantified.Count > 0 ? Math.Round(quantified.Sum(), 1) : null;
+        double? low = quantified.Count > 0
+            ? Math.Round(Math.Max(quantified.Max(), quantified.Sum() * 0.55), 1)
+            : null;
+        if (quantified.Count > 1)
+        {
+            notes.Add("Estimated gains interact and do not stack linearly — treat the range as an " +
+                      "order of magnitude, and re-measure after applying changes.");
+        }
+
         return new AdvicePlan
         {
             TargetFps = targetFps,
             MeasuredAverageFps = measuredFps,
             RequiredGainPercent = requiredGain,
-            EstimatedPlanGainPercent = estimated > 0 ? Math.Round(estimated, 1) : null,
+            EstimatedGainLowPercent = low,
+            EstimatedGainHighPercent = high,
             Recommendations = recommendations,
             Notes = notes,
         };
@@ -168,21 +195,15 @@ public static class RecommendationEngine
             .ThenByDescending(s => s.PerformanceGain)
             .ToList();
 
-        // With a measured gap, take settings until the cumulative estimate covers
-        // it; a small gap then yields a small plan. Without data, fixed counts.
         var maxCount = MaxSuggestions(request.Goal);
-        double cumulative = 0;
-        var taken = 0;
-        foreach (var setting in candidates)
-        {
-            if (taken >= maxCount)
-                break;
-            if (requiredGain is { } needed && cumulative >= needed)
-                break;
+        var selected = requiredGain is { } needed && needed > 0
+            // A measured gap gets the combination that covers it with the least
+            // visual damage — never "the biggest hammer first".
+            ? SelectCheapestCoveringSet(candidates, needed, maxCount)
+            : candidates.Take(maxCount).ToList();
 
-            var gain = GainPercent(setting);
-            cumulative += gain;
-            taken++;
+        foreach (var setting in selected)
+        {
             yield return new Recommendation
             {
                 Title = $"{game.Name}: lower \"{setting.Name}\" by one step",
@@ -191,6 +212,65 @@ public static class RecommendationEngine
                 ExpectedGainPercent = setting.EstimatedGainPercent > 0 ? setting.EstimatedGainPercent : null,
             };
         }
+    }
+
+    /// <summary>
+    /// Picks the subset of settings whose summed estimated gain covers the gap
+    /// while minimizing total visual cost, then change count. To close a +5% gap
+    /// this prefers one cheap fog tweak (gain 8, cost 1) over ray tracing
+    /// (gain 30, cost 3). Falls back to the best partial coverage when nothing
+    /// covers the gap. Candidate lists are small (≤ ~12), so exhaustive search
+    /// over subsets is fine.
+    /// </summary>
+    private static List<GameSetting> SelectCheapestCoveringSet(
+        List<GameSetting> candidates, double requiredGain, int maxCount)
+    {
+        var pool = candidates.Take(12).ToList();
+        List<GameSetting>? best = null;
+        (int QualityLoss, int Count, double NegGain) bestKey = default;
+
+        for (var mask = 1; mask < 1 << pool.Count; mask++)
+        {
+            if (System.Numerics.BitOperations.PopCount((uint)mask) > maxCount)
+                continue;
+
+            double gain = 0;
+            var loss = 0;
+            var count = 0;
+            for (var i = 0; i < pool.Count; i++)
+            {
+                if ((mask & (1 << i)) == 0)
+                    continue;
+                gain += GainPercent(pool[i]);
+                loss += pool[i].QualityLoss;
+                count++;
+            }
+            if (gain < requiredGain)
+                continue;
+
+            var key = (loss, count, -gain);
+            if (best is null || key.CompareTo(bestKey) < 0)
+            {
+                best = pool.Where((_, i) => (mask & (1 << i)) != 0).ToList();
+                bestKey = key;
+            }
+        }
+
+        if (best is not null)
+            return best.OrderByDescending(GainPercent).ToList();
+
+        // Nothing covers the gap: take the strongest candidates and let the
+        // caller flag the target as out of reach.
+        var fallback = new List<GameSetting>();
+        double cumulative = 0;
+        foreach (var setting in candidates)
+        {
+            if (fallback.Count >= maxCount || cumulative >= requiredGain)
+                break;
+            fallback.Add(setting);
+            cumulative += GainPercent(setting);
+        }
+        return fallback;
     }
 
     private static double GainPercent(GameSetting setting) =>
@@ -291,6 +371,12 @@ public static class RecommendationEngine
             notes.Add("At 1080p, upscaling below Quality mode renders from under 720p and gets " +
                       "visibly blurry — the mode was capped at Quality.");
         }
+        else if (mode != "Quality")
+        {
+            // The display resolution is only a proxy: the game may already render lower.
+            notes.Add("The upscaler mode assumes the game renders at your display's native " +
+                      "resolution — if it is already set lower, pick a less aggressive mode.");
+        }
 
         yield return new Recommendation
         {
@@ -300,7 +386,8 @@ public static class RecommendationEngine
         };
 
         if (requiredGain is > 40 &&
-            GpuCapabilities.AvailableFrameGeneration(gpu, game.Upscalers) is { } frameGen)
+            GpuCapabilities.AvailableFrameGeneration(gpu, game.Upscalers) is { } frameGen &&
+            HasFrameGenBaseFps(request.Frametimes?.AverageFps, notes))
         {
             yield return new Recommendation
             {
@@ -310,6 +397,23 @@ public static class RecommendationEngine
                          "not instead of one.",
             };
         }
+    }
+
+    /// <summary>
+    /// Frame generation interpolates between real frames: below ~45 real FPS the
+    /// latency and artifacts outweigh the fluidity, so it must not be advised.
+    /// Unknown FPS passes — the recommendation text carries the precondition.
+    /// </summary>
+    private static bool HasFrameGenBaseFps(double? measuredFps, List<string> notes)
+    {
+        if (measuredFps is { } fps && fps < MinimumFrameGenBaseFps)
+        {
+            notes.Add($"Frame generation was not suggested: your base frame rate ({fps:0} FPS) is " +
+                      $"below ~{MinimumFrameGenBaseFps} FPS, where it would feel laggy and artifact-prone. " +
+                      "Raise real FPS first.");
+            return false;
+        }
+        return true;
     }
 
     private static string ReasonForUpscaler(string upscaler, GpuInfo gpu) => upscaler switch
@@ -335,25 +439,33 @@ public static class RecommendationEngine
         };
     }
 
-    private static IEnumerable<Recommendation> FrameGenerationAdvice(AdviceRequest request)
+    private static IEnumerable<Recommendation> FrameGenerationAdvice(
+        AdviceRequest request, double? measuredFps, List<string> notes)
     {
         var gpu = request.Hardware?.PrimaryGpu;
         if (gpu is null || request.Game?.Upscalers is not { } upscalers)
             yield break;
         if (GpuCapabilities.AvailableFrameGeneration(gpu, upscalers) is not { } frameGen)
             yield break;
+        if (!HasFrameGenBaseFps(measuredFps, notes))
+            yield break;
 
         yield return new Recommendation
         {
             Title = $"{request.Game.Name}: enable {frameGen}",
             Reason = "Generated frames do not need the CPU, so frame generation is one of the few " +
-                     "things that helps a CPU-bound game — at the cost of some input latency.",
+                     "things that helps a CPU-bound game — at the cost of some input latency. " +
+                     "Only worthwhile from a healthy base frame rate (~50-60 real FPS).",
         };
     }
 
     private static int? PrimaryDisplayWidth(HardwareProfile? hardware) =>
         hardware?.Displays.FirstOrDefault(d => d.IsPrimary)?.WidthPixels
         ?? hardware?.Displays.FirstOrDefault()?.WidthPixels;
+
+    private static int? PrimaryDisplayRefresh(HardwareProfile? hardware) =>
+        hardware?.Displays.FirstOrDefault(d => d.IsPrimary)?.RefreshRateHz
+        ?? hardware?.Displays.FirstOrDefault()?.RefreshRateHz;
 
     // ----- Smoothness (target met on average) -------------------------------------
 
@@ -410,6 +522,50 @@ public static class RecommendationEngine
                 {
                     Title = "Disable ray tracing if enabled",
                     Reason = "Ray tracing is usually the single most expensive GPU setting.",
+                };
+                break;
+
+            case BottleneckType.ExternalGpuLoad:
+                yield return new Recommendation
+                {
+                    Title = "Close other GPU-hungry applications (browser tabs with video, capture " +
+                            "software, overlays, a second game)",
+                    Reason = "The GPU is saturated but mostly by other processes — no quality setting " +
+                             "should be lowered until the card belongs to the game again.",
+                };
+                yield return new Recommendation
+                {
+                    Title = "Re-run the analysis after closing them",
+                    Reason = "The real bottleneck can only be identified once external GPU load is gone.",
+                };
+                break;
+
+            case BottleneckType.ExternalCpuLoad:
+                yield return new Recommendation
+                {
+                    Title = "Identify and close (or pause) the CPU-hungry background process",
+                    Reason = "The saturated CPU load does not belong to the game — antivirus scans, " +
+                             "indexers, updaters and background renders are the usual culprits. " +
+                             "No game setting will fix this.",
+                };
+                yield return new Recommendation
+                {
+                    Title = "Re-run the analysis once the background load is gone",
+                    Reason = "The real bottleneck can only be identified on a quiet machine.",
+                };
+                break;
+
+            case BottleneckType.GpuHardwareLimit:
+                yield return new Recommendation
+                {
+                    Title = "Check GPU power cables, power limit and cooling",
+                    Reason = "The driver reports a hardware slowdown (HW slowdown / power brake): the " +
+                             "card is held back by a board or power limit, not by your settings.",
+                };
+                yield return new Recommendation
+                {
+                    Title = "Cap the frame rate while investigating",
+                    Reason = "Reduces the sustained load that trips the limit, without touching quality.",
                 };
                 break;
 
