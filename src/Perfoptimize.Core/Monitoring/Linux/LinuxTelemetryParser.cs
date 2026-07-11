@@ -45,4 +45,73 @@ public static class LinuxTelemetryParser
         var usage = 100.0 * (totalDelta - idleDelta) / totalDelta;
         return Math.Clamp(usage, 0, 100);
     }
+
+    /// <summary>
+    /// Parses every per-core "cpuN" line of /proc/stat, keyed by core name.
+    /// Needed to spot single-thread bottlenecks that the aggregate line hides.
+    /// </summary>
+    public static Dictionary<string, CpuTicks> ParsePerCoreTicks(string procStatText)
+    {
+        var cores = new Dictionary<string, CpuTicks>(StringComparer.Ordinal);
+        foreach (var line in procStatText.Split('\n'))
+        {
+            if (!line.StartsWith("cpu", StringComparison.Ordinal) || line.StartsWith("cpu ", StringComparison.Ordinal))
+                continue;
+            var fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (fields.Length < 5)
+                continue;
+
+            var values = new List<long>();
+            var valid = true;
+            foreach (var field in fields.Skip(1).Take(8))
+            {
+                if (!long.TryParse(field, out var value))
+                {
+                    valid = false;
+                    break;
+                }
+                values.Add(value);
+            }
+            if (!valid)
+                continue;
+            var idle = values[3] + (values.Count > 4 ? values[4] : 0);
+            cores[fields[0]] = new CpuTicks(idle, values.Sum());
+        }
+        return cores;
+    }
+
+    /// <summary>
+    /// Extracts utime+stime (jiffies consumed) from /proc/[pid]/stat. The comm
+    /// field may contain spaces and parentheses, so parsing starts after the
+    /// last ')'.
+    /// </summary>
+    public static long? ParseProcessTicks(string procPidStatText)
+    {
+        var afterComm = procPidStatText.LastIndexOf(')');
+        if (afterComm < 0)
+            return null;
+        var fields = procPidStatText[(afterComm + 1)..]
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        // After ')': state(0) ppid(1) ... utime is field 11, stime field 12.
+        if (fields.Length < 13 ||
+            !long.TryParse(fields[11], out var utime) ||
+            !long.TryParse(fields[12], out var stime))
+            return null;
+        return utime + stime;
+    }
+
+    /// <summary>
+    /// Process CPU usage as a share of the whole machine: the process's jiffy
+    /// delta over the all-core jiffy delta from /proc/stat's aggregate line.
+    /// </summary>
+    public static double? ProcessCpuUsageBetween(
+        long previousProcessTicks, long currentProcessTicks,
+        CpuTicks previousTotal, CpuTicks currentTotal)
+    {
+        var totalDelta = currentTotal.TotalTicks - previousTotal.TotalTicks;
+        var processDelta = currentProcessTicks - previousProcessTicks;
+        if (totalDelta <= 0 || processDelta < 0)
+            return null;
+        return Math.Clamp(100.0 * processDelta / totalDelta, 0, 100);
+    }
 }

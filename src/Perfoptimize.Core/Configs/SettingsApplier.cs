@@ -37,18 +37,34 @@ public sealed class SettingsApplier
         if (!write)
             return new ApplyResult { Changes = changes };
 
+        // Each file: back up, then swap the new content in atomically with its
+        // original encoding. If any file fails midway, every file already
+        // written in this run is rolled back from its fresh backup, so the
+        // user is never left with a half-applied plan.
         var backupPaths = new List<string>();
-        foreach (var fileGroup in changes
-                     .Where(c => c.Status == PlannedChangeStatus.Ready)
-                     .GroupBy(c => c.FilePath!, StringComparer.OrdinalIgnoreCase))
+        var written = new List<(string Path, string BackupPath)>();
+        try
         {
-            var path = fileGroup.Key;
-            backupPaths.Add(_backups.Backup(game.Name, path));
+            foreach (var fileGroup in changes
+                         .Where(c => c.Status == PlannedChangeStatus.Ready)
+                         .GroupBy(c => c.FilePath!, StringComparer.OrdinalIgnoreCase))
+            {
+                var path = fileGroup.Key;
+                var backupPath = _backups.Backup(game.Name, path);
+                backupPaths.Add(backupPath);
 
-            var text = configTexts[path];
-            foreach (var change in fileGroup)
-                text = SettingsPlanner.ApplyToText(text, change);
-            File.WriteAllText(path, text);
+                var text = configTexts[path];
+                foreach (var change in fileGroup)
+                    text = SettingsPlanner.ApplyToText(text, change);
+                SafeFileWriter.ReplaceAtomically(path, text);
+                written.Add((path, backupPath));
+            }
+        }
+        catch
+        {
+            foreach (var (path, backupPath) in written)
+                File.Copy(backupPath, path, overwrite: true);
+            throw;
         }
 
         return new ApplyResult

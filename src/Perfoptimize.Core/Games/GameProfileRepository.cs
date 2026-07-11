@@ -32,13 +32,14 @@ public static class GameProfileRepository
             if (stream is null)
                 continue;
             using var reader = new StreamReader(stream);
-            if (Parse(reader.ReadToEnd()) is { } profile)
+            if (Parse(reader.ReadToEnd()) is { } profile &&
+                GameProfileValidator.Validate(profile).Count == 0)
                 profiles.Add(profile);
         }
         return profiles;
     }
 
-    /// <summary>Loads extra profiles from a user directory; unreadable files are skipped.</summary>
+    /// <summary>Loads extra profiles from a user directory; unreadable or invalid files are skipped.</summary>
     public static IReadOnlyList<GameProfile> LoadFromDirectory(string directory)
     {
         if (!Directory.Exists(directory))
@@ -48,7 +49,8 @@ public static class GameProfileRepository
         {
             try
             {
-                if (Parse(File.ReadAllText(file)) is { } profile)
+                if (Parse(File.ReadAllText(file)) is { } profile &&
+                    GameProfileValidator.Validate(profile).Count == 0)
                     profiles.Add(profile);
             }
             catch (IOException)

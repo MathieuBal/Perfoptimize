@@ -154,23 +154,53 @@ static async Task<int> RunMonitorAsync(string[] args)
         : PerformanceMonitor.CreateForCurrentPlatform();
     var monitor = new PerformanceMonitor(source);
 
+    // On Windows, capture real frame times with PresentMon in parallel with the
+    // telemetry session — unless the user already provided a capture file.
+    Task<FrametimeStatistics?>? presentMonTask = null;
+    if (frametimeStats is null && running is not null && OperatingSystem.IsWindows())
+    {
+        if (PresentMonCapture.FindExecutable() is not null)
+        {
+            presentMonTask = PresentMonCapture.CaptureAsync(
+                running.ProcessId, TimeSpan.FromSeconds(durationSeconds));
+            Console.WriteLine("PresentMon found — capturing real frame times alongside telemetry.");
+        }
+        else
+        {
+            Console.WriteLine("Tip: install Intel PresentMon (on PATH or PERFOPTIMIZE_PRESENTMON) " +
+                              "to capture real FPS during monitoring.");
+        }
+    }
+
     var progress = new Progress<TelemetrySample>(s =>
-        Console.WriteLine($"  cpu {Percent(s.CpuUsagePercent),6} | gpu {Percent(s.GpuUsagePercent),6} | " +
-                          $"ram {Percent(s.RamUsagePercent),6} | vram {Percent(s.VramUsagePercent),6}"));
-    var report = await monitor.CaptureAsync(TimeSpan.FromSeconds(durationSeconds), onSample: progress);
+        Console.WriteLine($"  cpu {Percent(s.CpuUsagePercent),6} | core max {Percent(s.MaxCoreUsagePercent),6} | " +
+                          $"gpu {Percent(s.GpuUsagePercent),6} | ram {Percent(s.RamUsagePercent),6} | " +
+                          $"vram {Percent(s.VramUsagePercent),6}"));
+    var report = await monitor.CaptureAsync(
+        TimeSpan.FromSeconds(durationSeconds), onSample: progress, gameProcessId: running?.ProcessId);
+
+    if (presentMonTask is not null)
+        frametimeStats = await presentMonTask;
 
     var summary = report.Summary;
     Console.WriteLine();
     Console.WriteLine("=== Summary ===");
     Console.WriteLine($"Samples : {summary.SampleCount} over {summary.Duration.TotalSeconds:0}s");
-    Console.WriteLine($"CPU     : avg {Percent(summary.AverageCpuUsagePercent)}, peak {Percent(summary.PeakCpuUsagePercent)}");
-    Console.WriteLine($"GPU     : avg {Percent(summary.AverageGpuUsagePercent)}, peak {Percent(summary.PeakGpuUsagePercent)}");
+    Console.WriteLine($"CPU     : avg {Percent(summary.AverageCpuUsagePercent)}, peak {Percent(summary.PeakCpuUsagePercent)}, " +
+                      $"busiest core avg {Percent(summary.AverageMaxCoreUsagePercent)}");
+    if (summary.AverageGameCpuUsagePercent is { } gameCpu)
+        Console.WriteLine($"          game process: {gameCpu:0}% of the machine");
+    Console.WriteLine($"GPU     : avg {Percent(summary.AverageGpuUsagePercent)}, peak {Percent(summary.PeakGpuUsagePercent)}" +
+                      (summary.AverageGameGpuUsagePercent is { } gameGpu ? $", game share {gameGpu:0}%" : ""));
     Console.WriteLine($"RAM     : avg {Percent(summary.AverageRamUsagePercent)}, peak {Percent(summary.PeakRamUsagePercent)}");
     Console.WriteLine($"VRAM    : avg {Percent(summary.AverageVramUsagePercent)}, peak {Percent(summary.PeakVramUsagePercent)}");
     if (summary.PeakCpuTemperatureC is { } cpuTemp)
         Console.WriteLine($"CPU temp: peak {cpuTemp:0}°C");
     if (summary.PeakGpuTemperatureC is { } gpuTemp)
-        Console.WriteLine($"GPU temp: peak {gpuTemp:0}°C");
+        Console.WriteLine($"GPU temp: peak {gpuTemp:0}°C" +
+                          (summary.GpuThermalThrottleObserved ? " — driver reported thermal slowdown" : ""));
+    if (summary.AverageGpuCoreClockMhz is { } clock)
+        Console.WriteLine($"GPU clk : avg {clock:0} MHz");
 
     var analysis = BottleneckDetector.Analyze(summary);
     Console.WriteLine();

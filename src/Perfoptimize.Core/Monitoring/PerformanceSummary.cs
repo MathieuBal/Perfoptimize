@@ -7,14 +7,25 @@ public sealed class PerformanceSummary
     public TimeSpan Duration { get; init; }
     public double? AverageCpuUsagePercent { get; init; }
     public double? PeakCpuUsagePercent { get; init; }
+    /// <summary>Average usage of the busiest logical core — exposes single-thread limits.</summary>
+    public double? AverageMaxCoreUsagePercent { get; init; }
+    public double? PeakMaxCoreUsagePercent { get; init; }
+    /// <summary>CPU used by the game process, as a share of the whole machine.</summary>
+    public double? AverageGameCpuUsagePercent { get; init; }
     public double? AverageGpuUsagePercent { get; init; }
     public double? PeakGpuUsagePercent { get; init; }
+    /// <summary>GPU usage attributed to the game process (Windows GPU Engine counters).</summary>
+    public double? AverageGameGpuUsagePercent { get; init; }
     public double? AverageRamUsagePercent { get; init; }
     public double? PeakRamUsagePercent { get; init; }
     public double? AverageVramUsagePercent { get; init; }
     public double? PeakVramUsagePercent { get; init; }
     public double? PeakCpuTemperatureC { get; init; }
     public double? PeakGpuTemperatureC { get; init; }
+    /// <summary>Average GPU core clock over the session, for throttle analysis.</summary>
+    public double? AverageGpuCoreClockMhz { get; init; }
+    /// <summary>True when the driver reported an active thermal slowdown at least once.</summary>
+    public bool GpuThermalThrottleObserved { get; init; }
 }
 
 public static class TelemetryAggregator
@@ -30,14 +41,20 @@ public static class TelemetryAggregator
             Duration = samples[^1].Timestamp - samples[0].Timestamp,
             AverageCpuUsagePercent = Average(samples, s => s.CpuUsagePercent),
             PeakCpuUsagePercent = Max(samples, s => s.CpuUsagePercent),
+            AverageMaxCoreUsagePercent = Average(samples, s => s.MaxCoreUsagePercent),
+            PeakMaxCoreUsagePercent = Max(samples, s => s.MaxCoreUsagePercent),
+            AverageGameCpuUsagePercent = Average(samples, s => s.GameCpuUsagePercent),
             AverageGpuUsagePercent = Average(samples, s => s.GpuUsagePercent),
             PeakGpuUsagePercent = Max(samples, s => s.GpuUsagePercent),
+            AverageGameGpuUsagePercent = Average(samples, s => s.GameGpuUsagePercent),
             AverageRamUsagePercent = Average(samples, s => s.RamUsagePercent),
             PeakRamUsagePercent = Max(samples, s => s.RamUsagePercent),
             AverageVramUsagePercent = Average(samples, s => s.VramUsagePercent),
             PeakVramUsagePercent = Max(samples, s => s.VramUsagePercent),
             PeakCpuTemperatureC = Max(samples, s => s.CpuTemperatureC),
             PeakGpuTemperatureC = Max(samples, s => s.GpuTemperatureC),
+            AverageGpuCoreClockMhz = Average(samples, s => s.GpuCoreClockMhz),
+            GpuThermalThrottleObserved = samples.Any(s => s.GpuThermalThrottleActive == true),
         };
     }
 

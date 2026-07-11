@@ -5,7 +5,17 @@ namespace Perfoptimize.Core.Monitoring;
 
 /// <summary>One GPU line from nvidia-smi CSV output.</summary>
 public readonly record struct NvidiaGpuStatus(
-    double UtilizationPercent, double MemoryUsedMiB, double MemoryTotalMiB, double? TemperatureC);
+    double UtilizationPercent, double MemoryUsedMiB, double MemoryTotalMiB, double? TemperatureC,
+    double? CoreClockMhz = null, ulong? ThrottleReasonsMask = null)
+{
+    // clocks_throttle_reasons bit values documented by NVML:
+    // 0x08 HwSlowdown, 0x20 SwThermalSlowdown, 0x40 HwThermalSlowdown, 0x80 HwPowerBrakeSlowdown.
+    private const ulong ThermalSlowdownMask = 0x08 | 0x20 | 0x40 | 0x80;
+
+    /// <summary>True when the driver reports an active thermal/hardware slowdown; null when unknown.</summary>
+    public bool? ThermalThrottleActive =>
+        ThrottleReasonsMask is { } mask ? (mask & ThermalSlowdownMask) != 0 : null;
+}
 
 /// <summary>
 /// Queries the NVIDIA driver's nvidia-smi tool, which exists on both Windows
@@ -15,7 +25,8 @@ public readonly record struct NvidiaGpuStatus(
 public static class NvidiaSmi
 {
     private const string QueryArguments =
-        "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits";
+        "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu," +
+        "clocks.sm,clocks_throttle_reasons.active --format=csv,noheader,nounits";
 
     /// <summary>Runs nvidia-smi and parses the first GPU; null when unavailable.</summary>
     public static NvidiaGpuStatus? TryQuery()
@@ -45,8 +56,9 @@ public static class NvidiaSmi
     }
 
     /// <summary>
-    /// Parses one CSV line, e.g. "45, 6144, 12288, 65".
-    /// Temperature may be "[N/A]" on some setups.
+    /// Parses one CSV line, e.g. "45, 6144, 12288, 65, 1850, 0x0000000000000004".
+    /// The clock and throttle-reason fields are optional (older drivers), and
+    /// any field may be "[N/A]" on some setups.
     /// </summary>
     public static NvidiaGpuStatus? ParseLine(string line)
     {
@@ -58,11 +70,29 @@ public static class NvidiaSmi
             !double.TryParse(fields[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var memoryTotal))
             return null;
 
-        double? temperature =
-            double.TryParse(fields[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var temp)
-                ? temp
-                : null;
-        return new NvidiaGpuStatus(utilization, memoryUsed, memoryTotal, temperature);
+        return new NvidiaGpuStatus(
+            utilization, memoryUsed, memoryTotal,
+            TemperatureC: ParseDouble(fields, 3),
+            CoreClockMhz: ParseDouble(fields, 4),
+            ThrottleReasonsMask: ParseHexMask(fields, 5));
+    }
+
+    private static double? ParseDouble(string[] fields, int index) =>
+        index < fields.Length &&
+        double.TryParse(fields[index], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+
+    private static ulong? ParseHexMask(string[] fields, int index)
+    {
+        if (index >= fields.Length)
+            return null;
+        var text = fields[index];
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            text = text[2..];
+        return ulong.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var mask)
+            ? mask
+            : null;
     }
 
     /// <summary>VRAM usage percentage for a parsed status, when totals are known.</summary>

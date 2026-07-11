@@ -16,6 +16,8 @@ de réglages graphiques.
 - ✅ **Étape 8 — fichiers de configuration** (localisation, sauvegarde, restauration)
 - ✅ **Étape 9 — application des réglages** (prévisualisation par défaut, `--write` explicite)
 - ✅ **Étape 10 — conseiller contextuel** (objectif FPS, matériel réel, spécificités du jeu)
+- ✅ **Étape 11 — pipeline de mesure v2** (attribution au processus du jeu, charge par cœur,
+  throttling confirmé par le pilote, PresentMon intégré à `monitor`)
 
 ### Étape 1 : détection matérielle
 
@@ -125,6 +127,31 @@ révèlent. Les formats CSV de PresentMon v1 (`MsBetweenPresents`) et v2
 recommandations : en mode *quality*, les réglages au coût visuel élevé sont
 exclus ; en mode *performance*, davantage de réglages sont proposés et
 l'upscaling passe en mode Équilibré/Performance.
+
+### Pipeline de mesure v2 : mesurer le jeu, pas la machine
+
+Un diagnostic n'a de valeur que si les mesures correspondent au jeu. Le
+pipeline attribue donc les mesures au processus détecté :
+
+- **GPU par PID et par adaptateur** (Windows) : les compteurs « GPU Engine »
+  sont décodés (`pid_1234_luid_0x..._engtype_3D`) pour isoler l'utilisation
+  **du jeu** et l'adaptateur (LUID) sur lequel il rend réellement — un iGPU
+  de portable, un navigateur ou un overlay ne polluent plus les chiffres, et
+  la VRAM est comptée sur cette carte-là uniquement.
+- **CPU par cœur et par processus** : en plus du total machine, le pipeline
+  suit le cœur le plus chargé et la part CPU du processus du jeu. Le cas
+  classique « thread principal à 100 %, CPU total à 35 % » est maintenant
+  diagnostiqué comme limite mono-thread au lieu de « aucun goulot ».
+- **Throttling confirmé, pas supposé** : `nvidia-smi` fournit l'horloge GPU et
+  les raisons de limitation du pilote (`clocks_throttle_reasons`). Un
+  ralentissement thermique rapporté par le pilote est annoncé comme
+  **confirmé** ; une simple température élevée est annoncée comme une
+  **suspicion, explicitement non confirmée** (un power cap normal n'est pas
+  du throttling thermique).
+- **PresentMon intégré** : sous Windows, si PresentMon est installé (PATH ou
+  `PERFOPTIMIZE_PRESENTMON`), `monitor` capture automatiquement les vrais
+  frametimes du jeu pendant la session — plus besoin de la manœuvre manuelle
+  en deux commandes.
 
 ### Conseiller contextuel
 
@@ -253,8 +280,30 @@ dotnet build Perfoptimize.sln
 dotnet test Perfoptimize.sln
 ```
 
+### Limites connues
+
+Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire :
+
+- **La partie Windows n'a pas été validée sur une machine Windows réelle** —
+  elle compile et sa logique pure est testée (parseurs de compteurs, règles),
+  mais les requêtes WMI/compteurs restent à éprouver sur de vraies configs ;
+- **Seuls les fichiers INI sont modifiables** : Cyberpunk 2077 (JSON) et
+  GTA V (XML) sont localisés et sauvegardables, mais pas encore écrits ;
+- **La détection multi-écrans est heuristique** (résolutions par adaptateur
+  WMI, premier écran supposé principal) — les API `QueryDisplayConfig`
+  restent à intégrer ;
+- **La température CPU Windows** (`MSAcpi_ThermalZoneTemperature`) peut
+  refléter le chipset plutôt que le CPU — elle n'est utilisée que comme
+  suspicion, jamais comme preuve ;
+- **Les gains estimés des profils sont déclaratifs** (ordres de grandeur des
+  benchmarks publics), en attendant la boucle mesure → application →
+  re-mesure qui les calibrera sur la machine de l'utilisateur.
+
 ### Prochaines étapes
 
-1. Capture PresentMon pilotée automatiquement pendant `monitor` (Windows) ;
-2. Étendre les liaisons de config (plus de jeux, formats JSON/XML) ;
-3. Interface graphique (WPF/WinUI).
+1. **Boucle d'optimisation mesurée** : référence 60 s → un seul changement →
+   re-mesure dans la même scène → comparaison avant/après → conservation ou
+   restauration automatique ;
+2. Écriture JSON/XML (Cyberpunk 2077, GTA V) et lecture des réglages actuels ;
+3. Détection d'écrans via les API d'affichage Windows ;
+4. Interface graphique (WPF/WinUI), après fiabilisation du diagnostic.
