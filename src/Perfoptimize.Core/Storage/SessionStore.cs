@@ -91,7 +91,10 @@ public sealed class SessionStore : IDisposable
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        _connection = new SqliteConnection($"Data Source={databasePath}");
+        // Pooling=False: the store keeps one connection open for its lifetime,
+        // and on Windows a pooled handle would keep the .db file locked after
+        // Dispose (breaking deletion and any external cleanup).
+        _connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
         _connection.Open();
         Execute("""
             CREATE TABLE IF NOT EXISTS sessions (

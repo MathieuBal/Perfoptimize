@@ -151,14 +151,28 @@ public sealed class OptimizationLoop
         }
     }
 
-    /// <summary>Restores from the exact backups taken by this run — never
-    /// "the latest backup", which could belong to another operation.</summary>
+    /// <summary>
+    /// Rolls back the experiment: surgically reverts only the tested key to its
+    /// observed value (the game may have legitimately rewritten other keys in
+    /// the meantime), falling back to the exact backup taken by this run —
+    /// never "the latest backup", which could belong to another operation.
+    /// </summary>
     private static void Restore(ApplyResult applyResult)
     {
-        foreach (var (path, backupPath) in applyResult.BackupByFile)
+        foreach (var change in applyResult.Changes.Where(c => c.Status == PlannedChangeStatus.Ready))
         {
-            if (File.Exists(backupPath))
-                File.Copy(backupPath, path, overwrite: true);
+            var restored =
+                change is { FilePath: { } path, CurrentValue: { } original } &&
+                change.Setting.Config is { } binding &&
+                SurgicalRestore.TryRestoreKey(path, binding.Section, binding.Key, original);
+
+            if (!restored &&
+                change.FilePath is { } file &&
+                applyResult.BackupByFile.TryGetValue(file, out var backupPath) &&
+                File.Exists(backupPath))
+            {
+                File.Copy(backupPath, file, overwrite: true);
+            }
         }
     }
 

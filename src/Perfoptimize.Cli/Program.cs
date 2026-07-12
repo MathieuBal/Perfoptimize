@@ -599,18 +599,10 @@ static List<StoredRecommendation> SnapshotPlan(AdvicePlan plan, GameProfile? gam
     }).ToList();
 }
 
-/// <summary>Maps a stored session plan back to the profile's setting objects.
-/// Exact snapshots (file/key/values) win; name matching is the legacy fallback.</summary>
-static List<GameSetting> MatchPlanSettings(GameProfile game, IReadOnlyList<StoredRecommendation> plan)
-{
-    return plan
-        .Where(r => r.SettingName is not null)
-        .Select(r => r.ToExactSetting() ?? game.Settings.FirstOrDefault(s =>
-            s.Name.Equals(r.SettingName, StringComparison.OrdinalIgnoreCase)))
-        .Where(s => s is not null)
-        .Select(s => s!)
-        .ToList();
-}
+/// <summary>Maps a stored session plan back to applicable settings: exact
+/// snapshots only for modern plans, name matching only for legacy sessions.</summary>
+static List<GameSetting> MatchPlanSettings(GameProfile game, IReadOnlyList<StoredRecommendation> plan) =>
+    StoredPlanMapper.ToSettings(game, plan);
 
 static async Task<int> RunTuneAsync(string[] args)
 {
@@ -735,6 +727,10 @@ static async Task<int> RunTuneOneShotAsync(string[] args, string query)
     if (bottleneck is null)
         return Fail($"No recorded session for {game.Name} and no --bottleneck given. " +
                     "Run \"perfoptimize monitor\" while playing first, or pass --bottleneck explicitly.");
+    // The advisor refuses to touch settings for these verdicts; the tuning
+    // entry points must enforce the exact same protection.
+    if (!BottleneckTuning.IsTunable(bottleneck.Value))
+        return Fail($"Tuning refused for a {bottleneck} verdict: {BottleneckTuning.RefusalReason(bottleneck.Value)}");
     Console.WriteLine($"Tuning for the {bottleneck} bottleneck ({origin}).");
 
     var baselineCsv = ArgValue(args, "--baseline");
@@ -827,6 +823,8 @@ static async Task<int> RunTunePrepareAsync(string[] args, string? query)
     if (bottleneck is null)
         return Fail($"No recorded session for {game.Name} and no --bottleneck given. " +
                     "Run \"perfoptimize monitor\" while playing first, or pass --bottleneck explicitly.");
+    if (!BottleneckTuning.IsTunable(bottleneck.Value))
+        return Fail($"Tuning refused for a {bottleneck} verdict: {BottleneckTuning.RefusalReason(bottleneck.Value)}");
 
     // Baseline: a CSV captured just before closing the game, or live PresentMon.
     FrametimeStatistics? baseline = null;
@@ -862,8 +860,32 @@ static async Task<int> RunTunePrepareAsync(string[] args, string? query)
         return Fail($"\"{setting.Name}\" could not be applied (value outside the documented ladder, " +
                     "or config file missing) — nothing was changed.");
 
-    var pending = new TuningStateStore(TuningStateStore.DefaultDirectory()).Create(
-        game.Name, setting.Name, change.Note, baseline, applyResult.BackupByFile);
+    // Transactional: a change with no persisted experiment would be an orphan
+    // nobody can 'finish'. If saving the state fails, undo the change first.
+    var pending = new PendingTune
+    {
+        Id = TuningStateStore.NewId(),
+        GameName = game.Name,
+        SettingName = setting.Name,
+        ChangeDescription = change.Note,
+        Baseline = baseline,
+        BackupByFile = new Dictionary<string, string>(applyResult.BackupByFile),
+        ConfigPath = change.FilePath,
+        ConfigSection = setting.Config!.Section,
+        ConfigKey = setting.Config!.Key,
+        OriginalValue = change.CurrentValue,
+        AppliedValue = change.NewValue,
+    };
+    try
+    {
+        new TuningStateStore(TuningStateStore.DefaultDirectory()).Save(pending);
+    }
+    catch (Exception ex)
+    {
+        SurgicalRestore.TryRestoreKey(
+            change.FilePath!, setting.Config!.Section, setting.Config!.Key, change.CurrentValue!);
+        return Fail($"Could not persist the experiment ({ex.Message}) — the change was undone.");
+    }
 
     Console.WriteLine($"Applied: {change.Note} (backup taken, bottleneck from {origin}).");
     Console.WriteLine($"Baseline: {baseline.AverageFps:0.#} FPS avg, {baseline.OnePercentLowFps:0.#} 1% low.");
@@ -908,12 +930,27 @@ static int RunTuneFinish(string[] args, string? id)
             return Fail($"{pending.GameName} is running (pid {running.ProcessId}) — close it and " +
                         $"re-run \"perfoptimize tune finish {id} --after ...\" to restore.");
 
-        foreach (var (path, backupPath) in pending.BackupByFile)
+        // Surgical rollback: only the tested key goes back, so any change the
+        // game itself wrote between prepare and finish survives. The full
+        // backup copy is the fallback when the snapshot is unusable.
+        var surgical = pending is
+                       {
+                           ConfigPath: { } configPath, ConfigKey: { } configKey,
+                           OriginalValue: { } originalValue,
+                       } &&
+                       SurgicalRestore.TryRestoreKey(
+                           configPath, pending.ConfigSection ?? "", configKey, originalValue);
+        if (!surgical)
         {
-            if (File.Exists(backupPath))
-                File.Copy(backupPath, path, overwrite: true);
+            foreach (var (path, backupPath) in pending.BackupByFile)
+            {
+                if (File.Exists(backupPath))
+                    File.Copy(backupPath, path, overwrite: true);
+            }
         }
-        Console.WriteLine("Your previous settings are back in place.");
+        Console.WriteLine(surgical
+            ? $"\"{pending.SettingName}\" is back to its previous value (other settings untouched)."
+            : "Your previous settings are back in place (full backup restored).");
     }
 
     store.Delete(pending.Id);

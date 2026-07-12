@@ -205,18 +205,28 @@ Règles de conservation : gain moyen ≥ 3 % **ou** 1% low ≥ +8 %, mais toute
 régression sérieuse est bloquante — moyenne < −1 %, **1% low < −5 % ou stutter
 en hausse** font restaurer même si la moyenne progresse. Une seconde mesure
 impossible (fichier illisible, exception, annulation) = restauration
-systématique, garantie par `try/finally` et par la **sauvegarde exacte de
-l'expérience** (jamais « la dernière sauvegarde », qui pourrait appartenir à
-une autre opération). Sous Windows, `tune <jeu>` reste un mode guidé en une
-commande (PresentMon piloté) ; `tune <jeu> --baseline/--after` est une
-**simulation** qui n'écrit rien ; `tune pending` liste les expériences en
-attente.
+systématique, garantie par `try/finally`. La restauration est **chirurgicale** :
+seule la clé testée revient à sa valeur d'origine, les modifications que le jeu
+a lui-même écrites entre-temps (résolution choisie au menu…) survivent — la
+copie de la sauvegarde exacte de l'expérience ne sert que de repli. `prepare`
+est **transactionnel** : si l'expérience ne peut pas être persistée, le
+changement est immédiatement défait. Et le tuning est **refusé** pour les
+verdicts non adressables par un réglage (`ExternalCpuLoad`, `ExternalGpuLoad`,
+`GpuHardwareLimit`, `None`, `Unknown`) — la protection du conseiller est
+garantie dans la CLI et dans tous les replis (`BottleneckTuning.IsTunable`).
+Sous Windows, `tune <jeu>` reste un mode guidé en une commande (PresentMon
+piloté) ; `tune <jeu> --baseline/--after` est une **simulation** qui n'écrit
+rien ; `tune pending` liste les expériences en attente.
 
 Chaque session `monitor` enregistre en plus son **plan exact** — y compris,
 pour chaque réglage lié, le fichier, la section, la clé, la **valeur observée
 et la valeur proposée**. `apply <jeu> --session <id>` refuse une session d'un
 autre jeu, applique précisément ces valeurs, et laisse intacte toute clé dont
 la valeur a changé depuis la session (le plan ne décrit plus la réalité).
+Pour un plan moderne (avec instantanés), la correspondance **par nom n'existe
+plus** : un conseil non lié à un fichier n'est jamais deviné ; le nom affiché
+est de l'interface, pas un identifiant. Seules les sessions antérieures aux
+instantanés conservent l'ancien repli par nom.
 
 ### Conseiller contextuel
 
