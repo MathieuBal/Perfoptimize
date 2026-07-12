@@ -231,7 +231,9 @@ public class SessionPlanStorageTests : IDisposable
     public void Old_databases_are_migrated_in_place()
     {
         // Simulate a v1 database created before the plan columns existed.
-        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath}"))
+        // Pooling=False keeps Windows from holding the file after disposal.
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                   $"Data Source={_databasePath};Pooling=False"))
         {
             connection.Open();
             using var command = connection.CreateCommand();
