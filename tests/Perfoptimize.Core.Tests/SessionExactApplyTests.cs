@@ -148,16 +148,29 @@ public class TuningStateStoreTests : IDisposable
             AverageFrametimeMs = 20.8, WorstFrametimeMs = 41, StutterCount = 4, StutterPercent = 0.8,
         };
 
-        var pending = store.Create(
-            "The Witcher 3: Wild Hunt", "Shadow Quality",
-            "[Rendering] ShadowQuality: 4 → 3", baseline,
-            new Dictionary<string, string> { ["/tmp/user.settings"] = "/tmp/backup.bak" });
+        var pending = new PendingTune
+        {
+            Id = TuningStateStore.NewId(),
+            GameName = "The Witcher 3: Wild Hunt",
+            SettingName = "Shadow Quality",
+            ChangeDescription = "[Rendering] ShadowQuality: 4 → 3",
+            Baseline = baseline,
+            BackupByFile = new Dictionary<string, string> { ["/tmp/user.settings"] = "/tmp/backup.bak" },
+            ConfigPath = "/tmp/user.settings",
+            ConfigSection = "Rendering",
+            ConfigKey = "ShadowQuality",
+            OriginalValue = "4",
+            AppliedValue = "3",
+        };
+        store.Save(pending);
 
         var loaded = store.Load(pending.Id);
         Assert.NotNull(loaded);
         Assert.Equal("The Witcher 3: Wild Hunt", loaded.GameName);
         Assert.Equal(48.1, loaded.Baseline.AverageFps);
         Assert.Equal("/tmp/backup.bak", loaded.BackupByFile["/tmp/user.settings"]);
+        Assert.Equal("4", loaded.OriginalValue);   // surgical rollback data survives
+        Assert.Equal("ShadowQuality", loaded.ConfigKey);
         Assert.Single(store.ListPending());
 
         store.Delete(pending.Id);

@@ -19,6 +19,14 @@ public sealed class PendingTune
     public FrametimeStatistics Baseline { get; init; } = new();
     /// <summary>Config file → exact backup created when the change was applied.</summary>
     public Dictionary<string, string> BackupByFile { get; init; } = [];
+
+    // Exact edit performed, enabling a surgical rollback of the tested key only
+    // (the game may legitimately rewrite other keys between prepare and finish).
+    public string? ConfigPath { get; init; }
+    public string? ConfigSection { get; init; }
+    public string? ConfigKey { get; init; }
+    public string? OriginalValue { get; init; }
+    public string? AppliedValue { get; init; }
 }
 
 /// <summary>JSON-file persistence for pending tuning experiments.</summary>
@@ -40,22 +48,15 @@ public sealed class TuningStateStore
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Perfoptimize", "tuning");
 
-    public PendingTune Create(
-        string gameName, string settingName, string changeDescription,
-        FrametimeStatistics baseline, IReadOnlyDictionary<string, string> backupByFile)
+    /// <summary>Generates an id for a new experiment.</summary>
+    public static string NewId() => DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss");
+
+    /// <summary>Persists a pending experiment; throws on I/O failure so the
+    /// caller can undo the config change (prepare must be transactional).</summary>
+    public void Save(PendingTune pending)
     {
-        var pending = new PendingTune
-        {
-            Id = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss"),
-            GameName = gameName,
-            SettingName = settingName,
-            ChangeDescription = changeDescription,
-            Baseline = baseline,
-            BackupByFile = new Dictionary<string, string>(backupByFile),
-        };
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathFor(pending.Id), JsonSerializer.Serialize(pending, Options));
-        return pending;
     }
 
     public PendingTune? Load(string id)

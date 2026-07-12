@@ -76,10 +76,14 @@ public class IniFileTests
 
 public class ConfigPathResolverTests
 {
+    // Platform-neutral fixture: hardcoded '/' in expected values broke the
+    // Windows leg of the CI matrix.
+    private static readonly string DocumentsDir =
+        Path.Combine(Path.GetTempPath(), "player", "Documents");
+
     private static string? Lookup(string token) => token switch
     {
-        "DOCUMENTS" => "/home/player/Documents",
-        "LOCALAPPDATA" => "/home/player/.local",
+        "DOCUMENTS" => DocumentsDir,
         _ => null,
     };
 
@@ -89,9 +93,7 @@ public class ConfigPathResolverTests
         var resolved = ConfigPathResolver.Resolve(
             @"%DOCUMENTS%\The Witcher 3\user.settings", Lookup);
 
-        var expected = "/home/player/Documents/The Witcher 3/user.settings"
-            .Replace('/', Path.DirectorySeparatorChar);
-        Assert.Equal(expected, resolved);
+        Assert.Equal(Path.Combine(DocumentsDir, "The Witcher 3", "user.settings"), resolved);
     }
 
     [Fact]
