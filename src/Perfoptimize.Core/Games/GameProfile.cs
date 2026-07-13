@@ -36,10 +36,47 @@ public enum SettingImpact
     Mixed,
 }
 
+/// <summary>
+/// What to do with a setting to gain performance. Crucial: not every setting is
+/// "lower for FPS" — some (engine multithreading) HELP when left on, and some
+/// can only be judged by measurement. The recommendation engine must respect
+/// this instead of blindly lowering everything.
+/// </summary>
+public enum SettingAction
+{
+    /// <summary>Lower it by one step to gain FPS (the common case).</summary>
+    Lower,
+    /// <summary>Turn it off entirely (ray tracing, HairWorks).</summary>
+    Disable,
+    /// <summary>Leave it ON — lowering/disabling it usually hurts performance.</summary>
+    KeepEnabled,
+    /// <summary>Only a measured A/B test can decide (e.g. DX11 vs DX12 vs Vulkan).</summary>
+    TestAlternatives,
+    /// <summary>Change it in the game's menu; never applied automatically.</summary>
+    ManualOnly,
+}
+
+/// <summary>How trustworthy a setting's expected gain is.</summary>
+public enum EvidenceLevel
+{
+    /// <summary>Order-of-magnitude guess from the profile — not verified.</summary>
+    Estimated,
+    /// <summary>Commonly recommended by the game's community.</summary>
+    CommunityValidated,
+    /// <summary>From published benchmarks.</summary>
+    Benchmarked,
+    /// <summary>Measured on THIS machine (via the tune loop).</summary>
+    LocallyMeasured,
+}
+
 public sealed class GameSetting
 {
     public string Name { get; init; } = "Unknown";
     public SettingImpact Impact { get; init; }
+    /// <summary>What to do with this setting to gain performance.</summary>
+    public SettingAction Action { get; init; } = SettingAction.Lower;
+    /// <summary>How trustworthy this setting's expected gain is.</summary>
+    public EvidenceLevel Evidence { get; init; } = EvidenceLevel.Estimated;
     /// <summary>Visual cost of lowering this setting, from 0 (invisible) to 5 (very visible).</summary>
     public int QualityLoss { get; init; }
     /// <summary>Typical FPS gain of lowering this setting, from 0 (none) to 5 (major).</summary>
@@ -57,6 +94,9 @@ public sealed class GameSetting
     public IReadOnlyDictionary<string, double>? VramGiBByLevel { get; init; }
     /// <summary>Where this setting lives in the game's config files; null when unknown.</summary>
     public SettingBinding? Config { get; init; }
+
+    /// <summary>A setting the engine may recommend lowering/disabling for FPS.</summary>
+    public bool IsAutoLowerable => Action is SettingAction.Lower or SettingAction.Disable;
 }
 
 /// <summary>

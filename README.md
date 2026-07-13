@@ -24,6 +24,30 @@ de réglages graphiques.
   autonome, téléchargement de PresentMon depuis l'interface)
 - ✅ **Étape 14 — détection automatique des jeux + optimisation PC globale** (reconnaissance
   heuristique des jeux sans profil, interface en deux onglets Jeux / Système, conseiller matériel)
+- ✅ **Étape 15 — sémantique des réglages** (chaque réglage porte une *action* et un *niveau de
+  preuve* ; fin de la logique « tout baisser », gains affichés comme théoriques tant que non mesurés)
+
+## Sémantique des réglages : ne pas « tout baisser »
+
+Tous les réglages ne s'optimisent pas en les baissant. Chaque `GameSetting`
+porte désormais :
+
+- une **action** : `lower` (baisser d'un cran), `disable` (désactiver, ex. ray
+  tracing), **`keepEnabled`** (à laisser activé — ex. *Engine Multithreading*
+  de Path of Exile, dont la désactivation nuit souvent aux perfs),
+  `testAlternatives` (à départager par un test A/B mesuré, ex. renderer
+  DX11/DX12/Vulkan), `manualOnly` (à changer dans le menu du jeu) ;
+- un **niveau de preuve** : `estimated` (estimation du profil, non vérifiée),
+  `communityValidated`, `benchmarked`, `locallyMeasured` (mesuré sur ta
+  machine via la boucle `tune`).
+
+Conséquences : un réglage `keepEnabled` n'est **jamais** proposé à la baisse ;
+si un jeu connu n'a aucun réglage sûr pour le goulot, l'assistant le **dit**
+plutôt que d'inventer des conseils génériques (Path of Exile n'a ni foule ni
+distance d'affichage) ; et tant qu'aucune mesure PresentMon n'existe, les gains
+sont affichés comme **théoriques** (« jusqu'à ~X % selon le profil »), pas comme
+un résultat personnalisé. La confiance du diagnostic (`suspecté` vs `confirmé`)
+est mise en avant dans l'interface.
 
 ## Détection automatique et optimisation globale
 

@@ -6,10 +6,11 @@
     { "path": "%DOCUMENTS%\\My Games\\Path of Exile\\production_Config.ini", "format": "ini" }
   ],
   "settings": [
-    { "name": "Shadows", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },
-    { "name": "Global Illumination", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 15 },
-    { "name": "Effects Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
-    { "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2 },
-    { "name": "Engine Multithreading", "impact": "cpu", "qualityLoss": 0, "performanceGain": 3, "estimatedGainPercent": 10 }
+    { "name": "Shadows", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },
+    { "name": "Global Illumination", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 15 },
+    { "name": "Effects Quality", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Texture Quality", "impact": "vram", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2 },
+    { "name": "Engine Multithreading", "impact": "cpu", "action": "keepEnabled", "evidence": "communityValidated", "qualityLoss": 0, "performanceGain": 0, "estimatedGainPercent": 0 },
+    { "name": "Renderer (DirectX 11 / 12 / Vulkan)", "impact": "mixed", "action": "testAlternatives", "evidence": "estimated", "qualityLoss": 0, "performanceGain": 0, "estimatedGainPercent": 0 }
   ]
 }

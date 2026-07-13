@@ -151,9 +151,13 @@ function renderResults(r) {
       (r.primeSeconds >= 2 ? ` La première sonde a pris ${r.primeSeconds}s — la télémétrie est lente à démarrer, réessaie.` : "") + `</p>`;
   }
 
-  html += `<div style="margin:6px 0 14px">
+  const confidenceLine = b.confidence === "Suspected"
+    ? `<div class="muted" style="font-size:13px;margin-top:4px">⚠ Diagnostic <strong>suspecté</strong> — confiance moyenne. À confirmer avant toute modification.</div>`
+    : `<div class="muted" style="font-size:13px;margin-top:4px">Diagnostic confirmé.</div>`;
+  html += `<div style="margin:6px 0 10px">
       <span class="badge ${badgeClass}${suspected}">${b.type}</span>
     </div>
+    ${confidenceLine}
     <p>${b.explanation}</p>`;
 
   const g = r.game ? `<span class="muted">Jeu : ${r.game}</span>` : `<span class="muted">Analyse système</span>`;
@@ -192,8 +196,19 @@ function renderResults(r) {
 
   if (r.recommendations.length) {
     html += `<h3 style="font-size:14px;margin:16px 0 4px">Recommandations</h3>`;
+    if (!r.gainsAreMeasured) {
+      html += `<p class="muted" style="font-size:12.5px;margin:0 0 8px">Gains <strong>théoriques</strong> issus du profil,
+        non vérifiés sur ta machine. Installe PresentMon (onglet Système) pour mesurer les vrais gains.</p>`;
+    }
     for (const rec of r.recommendations) {
-      const gain = rec.expectedGainPercent ? `<span class="g"> ~+${Math.round(rec.expectedGainPercent)}%</span>` : "";
+      let gain = "";
+      if (rec.expectedGainPercent) {
+        const measured = rec.evidence === "LocallyMeasured";
+        const label = measured
+          ? `~+${Math.round(rec.expectedGainPercent)}% (mesuré)`
+          : `jusqu'à ~+${Math.round(rec.expectedGainPercent)}% (théorique)`;
+        gain = `<span class="g" style="${measured ? "" : "opacity:.85;font-weight:600"}"> ${label}</span>`;
+      }
       html += `<div class="reco"><div class="t">${rec.title}${gain}</div><div class="r">${rec.reason}</div></div>`;
     }
   }

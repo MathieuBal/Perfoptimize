@@ -123,7 +123,13 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         fps = frametimes is null ? null : new { frametimes.AverageFps, frametimes.OnePercentLowFps, frametimes.StutterPercent },
         bottleneck = new { type = analysis.Type.ToString(), confidence = analysis.Confidence.ToString(), analysis.Explanation },
         target = new { plan.TargetFps, plan.MeasuredAverageFps, plan.RequiredGainPercent, gainLow = plan.EstimatedGainLowPercent, gainHigh = plan.EstimatedGainHighPercent },
-        recommendations = plan.Recommendations.Select(r => new { r.Title, r.Reason, r.ExpectedGainPercent }),
+        recommendations = plan.Recommendations.Select(r => new
+        {
+            r.Title, r.Reason, r.ExpectedGainPercent, evidence = r.Evidence.ToString(),
+        }),
+        // Whether any gain is measured on this machine: without frametimes, every
+        // number is theoretical and must be shown as such.
+        gainsAreMeasured = frametimes is not null,
         notes = plan.Notes,
     });
 });
@@ -180,7 +186,9 @@ app.MapPost("/api/apply", (ApplyRequest request) =>
 
     var settings = RecommendationEngine
         .Recommend(new BottleneckAnalysis { Type = bottleneck }, game, goal)
-        .Where(r => r.Setting?.Config is not null)
+        // Only auto-lowerable settings may be written — never a KeepEnabled or
+        // TestAlternatives setting, even if it carries a config binding.
+        .Where(r => r.Setting is { Config: not null } s && s.IsAutoLowerable)
         .Select(r => r.Setting!)
         .ToList();
     if (settings.Count == 0)

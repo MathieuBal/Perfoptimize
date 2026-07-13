@@ -277,9 +277,15 @@ static async Task<int> RunMonitorAsync(string[] args)
     {
         Console.WriteLine();
         Console.WriteLine($"Recommendations ({goal} goal):");
+        if (plan.MeasuredAverageFps is null)
+            Console.WriteLine("  (gains below are theoretical profile estimates — install PresentMon to measure them)");
         foreach (var recommendation in plan.Recommendations)
         {
-            var gain = recommendation.ExpectedGainPercent is { } g ? $" (~+{g:0}%)" : "";
+            string gain = "";
+            if (recommendation.ExpectedGainPercent is { } g)
+                gain = recommendation.Evidence == EvidenceLevel.LocallyMeasured
+                    ? $" (~+{g:0}% measured)"
+                    : $" (up to ~+{g:0}% theoretical)";
             Console.WriteLine($"- {recommendation.Title}{gain}");
             Console.WriteLine($"    {recommendation.Reason}");
         }
@@ -539,7 +545,7 @@ static int RunApply(string[] args)
         var recommendations = RecommendationEngine.Recommend(
             new BottleneckAnalysis { Type = bottleneck }, game, goal);
         settingsToLower = recommendations
-            .Where(r => r.Setting is not null)
+            .Where(r => r.Setting is { } s && s.IsAutoLowerable)
             .Select(r => r.Setting!)
             .ToList();
     }
@@ -589,7 +595,7 @@ static List<StoredRecommendation> SnapshotPlan(AdvicePlan plan, GameProfile? gam
     if (game is not null)
     {
         var boundSettings = plan.Recommendations
-            .Where(r => r.Setting?.Config is not null)
+            .Where(r => r.Setting is { Config: not null } s && s.IsAutoLowerable)
             .Select(r => r.Setting!)
             .ToList();
         if (boundSettings.Count > 0)
@@ -715,9 +721,9 @@ static GameSetting? PickTuneSetting(GameProfile game, BottleneckType bottleneck,
     };
     return plan.Recommendations
                .Select(r => r.Setting)
-               .FirstOrDefault(s => s?.Config is not null)
+               .FirstOrDefault(s => s is { Config: not null } && s.IsAutoLowerable)
            ?? game.Settings
-               .Where(s => s.Config is not null && relevantImpacts.Contains(s.Impact))
+               .Where(s => s.Config is not null && s.IsAutoLowerable && relevantImpacts.Contains(s.Impact))
                .OrderByDescending(s => s.PerformanceGain - s.QualityLoss)
                .FirstOrDefault();
 }
