@@ -998,8 +998,13 @@ static void PrintHardwareReport(HardwareProfile profile)
     Console.WriteLine();
 
     Console.WriteLine($"CPU     : {profile.Cpu.Name}");
+    // WMI reports the BASE clock, not the boost — saying "up to" would be wrong
+    // (an i7-10700K shows 3.8 GHz here but boosts to 5.1). Invariant culture
+    // keeps the report's number format consistent regardless of OS language.
     Console.WriteLine($"          {profile.Cpu.PhysicalCores} cores / {profile.Cpu.LogicalCores} threads" +
-                      (profile.Cpu.MaxClockMhz is { } clock ? $", up to {clock / 1000.0:0.0} GHz" : ""));
+                      (profile.Cpu.MaxClockMhz is { } clock
+                          ? $", base {(clock / 1000.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} GHz"
+                          : ""));
 
     if (profile.Gpus.Count == 0)
     {
