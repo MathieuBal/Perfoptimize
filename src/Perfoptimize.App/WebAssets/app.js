@@ -167,7 +167,88 @@ function renderResults(r) {
   }
   for (const note of r.notes) html += `<div class="note">${note}</div>`;
 
+  // Optimization panel: only for a detected game with a tunable verdict.
+  const tunable = ["Gpu", "Cpu", "Vram", "Ram", "Thermal"].includes(b.type);
+  if (r.game && tunable) {
+    window.__opt = { game: r.game, bottleneck: b.type, goal: $("goal").value };
+    html += `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+      <h3 style="font-size:14px;margin:0 0 8px">Appliquer aux fichiers de config</h3>
+      <p class="muted" style="font-size:13px">Modifie automatiquement les réglages liés à un fichier de configuration.
+      Prévisualise d'abord ; rien n'est écrit sans ta confirmation, et une sauvegarde est faite avant toute modification.</p>
+      <button id="preview" style="margin-top:6px">Prévisualiser les modifications</button>
+      <div id="opt-out" style="margin-top:12px"></div>
+    </div>`;
+  }
+
   $("results").innerHTML = html;
+  const pv = $("preview");
+  if (pv) pv.onclick = previewApply;
+}
+
+async function previewApply() {
+  const o = window.__opt;
+  const out = $("opt-out");
+  out.innerHTML = `<span class="spinner"></span> Calcul des modifications…`;
+  try {
+    const r = await postJson("/api/apply", { game: o.game, bottleneck: o.bottleneck, goal: o.goal, write: false });
+    if (!r.ok) { out.innerHTML = `<span class="status-off">${r.message}</span>`; return; }
+    renderPlan(r, false);
+  } catch (e) {
+    out.innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
+  }
+}
+
+function renderPlan(r, written) {
+  const ready = r.changes.filter(c => c.status === "Ready");
+  let html = "";
+  for (const c of r.changes) {
+    const ok = c.status === "Ready";
+    const label = ok
+      ? `<strong>${c.setting}</strong> : ${c.current} → ${c.proposed}`
+      : `<span class="muted">${c.setting} — ${c.note}</span>`;
+    html += `<div style="padding:4px 0">${written && ok ? "✓ " : ""}${label}</div>`;
+  }
+  if (written) {
+    html += `<div class="status-ok" style="margin-top:10px">✓ Appliqué. Sauvegarde créée — tu peux restaurer à tout moment.</div>
+      <button id="restore" class="ghost" style="margin-top:10px">Restaurer les anciens réglages</button>`;
+  } else if (ready.length) {
+    html += `<div style="margin-top:12px">
+      <button class="primary" id="do-apply">Appliquer (jeu fermé)</button>
+      <button id="restore" class="ghost" style="margin-left:8px">Restaurer</button></div>
+      <p class="muted" style="font-size:12px;margin-top:6px">Ferme le jeu avant d'appliquer : il réécrirait sa config en quittant.</p>`;
+  } else {
+    html += `<p class="muted" style="margin-top:8px">Aucune modification applicable (réglages déjà au minimum, ou à changer dans le menu).</p>`;
+  }
+  $("opt-out").innerHTML = html;
+  const ap = $("do-apply"); if (ap) ap.onclick = doApply;
+  const rs = $("restore"); if (rs) rs.onclick = doRestore;
+}
+
+async function doApply() {
+  const o = window.__opt;
+  const out = $("opt-out");
+  out.innerHTML = `<span class="spinner"></span> Application…`;
+  try {
+    const r = await postJson("/api/apply", { game: o.game, bottleneck: o.bottleneck, goal: o.goal, write: true });
+    if (!r.ok) { out.innerHTML = `<span class="status-off">${r.message}</span>
+      <button id="restore" class="ghost" style="margin-top:8px">Restaurer</button>`;
+      $("restore").onclick = doRestore; return; }
+    renderPlan(r, true);
+  } catch (e) {
+    out.innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
+  }
+}
+
+async function doRestore() {
+  const o = window.__opt;
+  const out = $("opt-out");
+  out.innerHTML = `<span class="spinner"></span> Restauration…`;
+  try {
+    const r = await postJson("/api/restore", { game: o.game });
+    out.innerHTML = r.ok ? `<span class="status-ok">✓ ${r.message}</span>` : `<span class="status-off">${r.message}</span>`;
+  } catch (e) {
+    out.innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
+  }
 }
 
 // ----- Tools -----------------------------------------------------------------
@@ -221,6 +302,14 @@ $("quit").onclick = async () => {
 
 $("run").onclick = runMonitor;
 
+async function loadVersion() {
+  try {
+    const v = await getJson("/api/version");
+    $("version").textContent = `· v${v.version}`;
+  } catch { /* non-essential */ }
+}
+
 loadHardware();
 loadGames();
 loadTools();
+loadVersion();

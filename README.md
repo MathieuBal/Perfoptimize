@@ -35,19 +35,34 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows-exe.ps1
 # → produit dist\Perfoptimize.exe
 ```
 
-Double-clique sur `Perfoptimize.exe` : il démarre un petit serveur local et
-ouvre un tableau de bord dans ton navigateur. L'interface permet de :
+L'exécutable est produit dans **`dist\Perfoptimize.exe`**. Double-clique
+dessus : il démarre un petit serveur local et ouvre un tableau de bord dans ton
+navigateur (garde la fenêtre ouverte pendant l'utilisation ; le bouton
+« Quitter » l'arrête). L'interface permet de :
 
 - voir le **matériel détecté** (CPU, GPU, VRAM, RAM, écran) ;
 - voir le **jeu en cours** parmi les jeux reconnus ;
 - lancer une **analyse** (durée, objectif qualité/équilibré/performance, FPS
   visés) et lire le goulot, les métriques et les recommandations ;
+- **appliquer les réglages** aux fichiers de config directement depuis
+  l'interface : aperçu (rien n'est écrit), application (jeu fermé exigé,
+  sauvegarde automatique), et restauration en un clic — avec les mêmes
+  garde-fous que la CLI (verdicts externes refusés) ;
 - **télécharger et installer PresentMon** en un clic (mesure des vrais FPS),
   depuis la source officielle Intel (`GameTechDev/PresentMon`).
 
 La logique métier est entièrement partagée avec la CLI (projet
 `Perfoptimize.Core`) : l'interface n'est qu'une façade, le moteur est le même.
 Pour développer l'UI sans produire l'exe : `dotnet run --project src/Perfoptimize.App`.
+
+### Mettre à jour
+
+Comme le projet se construit depuis un clone git, une mise à jour récupère le
+code puis reconstruit l'exe (ferme d'abord l'application) :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1
+```
 
 ### Étape 1 : détection matérielle
 
