@@ -16,3 +16,6 @@ TestResults/
 
 # Local hardware profiles produced by the CLI
 hardware-profile.json
+
+# Publish output
+dist/

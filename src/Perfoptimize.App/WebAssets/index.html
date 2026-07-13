@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Perfoptimize</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <h1><span class="logo">🎮</span> Perfoptimize</h1>
+    <button class="ghost" id="quit" title="Arrêter l'application">Quitter</button>
+  </header>
+
+  <main>
+    <section class="card" id="hardware-card">
+      <h2>Matériel</h2>
+      <div id="hardware"><span class="spinner"></span> Analyse en cours…</div>
+    </section>
+
+    <section class="card" id="game-card">
+      <h2>Jeu détecté</h2>
+      <div id="game"><span class="spinner"></span> Recherche…</div>
+    </section>
+
+    <section class="card">
+      <h2>Analyser les performances</h2>
+      <div class="controls">
+        <label>Durée
+          <select id="seconds">
+            <option value="10">10 s</option>
+            <option value="30" selected>30 s</option>
+            <option value="60">60 s</option>
+          </select>
+        </label>
+        <label>Objectif
+          <select id="goal">
+            <option value="quality">Qualité</option>
+            <option value="balanced" selected>Équilibré</option>
+            <option value="performance">Performance</option>
+          </select>
+        </label>
+        <label>FPS visés
+          <input type="number" id="targetFps" min="30" max="360" step="1" value="60">
+        </label>
+        <button class="primary" id="run">Lancer l'analyse</button>
+      </div>
+      <p class="muted" id="run-hint" style="margin-top:12px">
+        Lance ton jeu, reste dans une scène représentative, puis clique sur « Lancer l'analyse ».
+      </p>
+      <div id="results" class="hidden"></div>
+    </section>
+
+    <section class="card" id="tools-card">
+      <h2>Outils</h2>
+      <div id="tools"><span class="spinner"></span> Vérification…</div>
+    </section>
+  </main>
+
+  <footer>Perfoptimize — assistant d'optimisation de jeux · interface locale</footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

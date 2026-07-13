@@ -20,6 +20,34 @@ de réglages graphiques.
   throttling confirmé par le pilote, PresentMon intégré à `monitor`)
 - ✅ **Étape 12 — diagnostic v3 et boucle mesurée** (attribution utilisée dans les verdicts,
   contention GPU externe, confiance, plan de session appliqué à l'identique, `tune`)
+- ✅ **Étape 13 — application de bureau** (interface graphique locale, exécutable Windows
+  autonome, téléchargement de PresentMon depuis l'interface)
+
+## Application de bureau (le plus simple)
+
+Pour un usage sans ligne de commande, Perfoptimize se compile en **un seul
+exécutable Windows autonome** — le runtime .NET est inclus, rien d'autre à
+installer.
+
+```powershell
+# Depuis le dossier du projet, sur Windows :
+powershell -ExecutionPolicy Bypass -File scripts\build-windows-exe.ps1
+# → produit dist\Perfoptimize.exe
+```
+
+Double-clique sur `Perfoptimize.exe` : il démarre un petit serveur local et
+ouvre un tableau de bord dans ton navigateur. L'interface permet de :
+
+- voir le **matériel détecté** (CPU, GPU, VRAM, RAM, écran) ;
+- voir le **jeu en cours** parmi les jeux reconnus ;
+- lancer une **analyse** (durée, objectif qualité/équilibré/performance, FPS
+  visés) et lire le goulot, les métriques et les recommandations ;
+- **télécharger et installer PresentMon** en un clic (mesure des vrais FPS),
+  depuis la source officielle Intel (`GameTechDev/PresentMon`).
+
+La logique métier est entièrement partagée avec la CLI (projet
+`Perfoptimize.Core`) : l'interface n'est qu'une façade, le moteur est le même.
+Pour développer l'UI sans produire l'exe : `dotnet run --project src/Perfoptimize.App`.
 
 ### Étape 1 : détection matérielle
 

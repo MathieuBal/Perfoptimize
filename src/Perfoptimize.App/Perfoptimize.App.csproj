@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Perfoptimize.Core\Perfoptimize.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Perfoptimize</AssemblyName>
+    <RootNamespace>Perfoptimize.App</RootNamespace>
+    <!-- Single-file friendly: the UI assets are embedded, not loose files. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Serve the dashboard from embedded resources so a single-file .exe works. -->
+    <EmbeddedResource Include="WebAssets\**\*" />
+  </ItemGroup>
+
+</Project>
