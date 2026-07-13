@@ -57,18 +57,50 @@ async function loadHardware() {
 async function loadGames() {
   try {
     const g = await getJson("/api/games");
-    const running = g.running
-      ? `<span class="status-ok">▶ ${g.running.name}</span> <span class="muted">(pid ${g.running.processId})</span>`
-      : `<span class="status-off">Aucun jeu connu en cours d'exécution</span>`;
+    let running;
+    if (!g.running) {
+      running = `<span class="status-off">Aucun jeu en cours d'exécution</span>`;
+    } else if (g.running.isKnown) {
+      running = `<span class="status-ok">▶ ${g.running.name}</span> <span class="muted">(pid ${g.running.processId}) · profil détaillé</span>`;
+    } else {
+      const why = (g.running.reasons || []).join(" · ");
+      running = `<span class="status-ok">▶ ${g.running.name}</span> <span class="muted">(pid ${g.running.processId}) · détecté automatiquement</span>` +
+        (why ? `<div class="muted" style="font-size:12px;margin-top:4px">${why}</div>` : "") +
+        `<div class="muted" style="font-size:12px;margin-top:2px">Jeu sans profil : analyse et conseils génériques disponibles, pas d'application automatique.</div>`;
+    }
     const known = g.known.map(k => `<span class="chip">${k.name}</span>`).join("");
     $("game").innerHTML =
       `<div style="font-size:16px;margin-bottom:10px">${running}</div>
-       <div class="muted" style="font-size:12px;margin-bottom:6px">${g.known.length} jeux reconnus :</div>
+       <div class="muted" style="font-size:12px;margin-bottom:6px">${g.known.length} jeux avec profil détaillé :</div>
        <div>${known}</div>
        <button class="ghost" id="refresh-game" style="margin-top:12px">Rafraîchir</button>`;
     $("refresh-game").onclick = loadGames;
   } catch (e) {
     $("game").innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
+  }
+}
+
+// ----- System optimization ---------------------------------------------------
+async function loadSystem() {
+  try {
+    const s = await getJson("/api/system");
+    if (!s.advice.length) {
+      $("system").innerHTML = `<span class="status-ok">✓ Rien à signaler — ta configuration est bien équilibrée pour le jeu.</span>`;
+      return;
+    }
+    const sevClass = { Warning: "bad", Suggestion: "warn", Info: "muted" };
+    const sevLabel = { Warning: "À corriger", Suggestion: "Conseillé", Info: "Info" };
+    let html = "";
+    for (const a of s.advice) {
+      const c = sevClass[a.severity] || "muted";
+      html += `<div class="reco" style="border-left-color:var(--${c === "muted" ? "border" : c})">
+        <div class="t">${a.title} <span class="chip">${a.category}</span>
+          <span class="badge ${c === "bad" ? "external" : c === "warn" ? "cpu" : "none"}">${sevLabel[a.severity] || a.severity}</span></div>
+        <div class="r">${a.detail}</div></div>`;
+    }
+    $("system").innerHTML = html;
+  } catch (e) {
+    $("system").innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
   }
 }
 
@@ -167,9 +199,9 @@ function renderResults(r) {
   }
   for (const note of r.notes) html += `<div class="note">${note}</div>`;
 
-  // Optimization panel: only for a detected game with a tunable verdict.
+  // Optimization panel: only for a KNOWN game (config-bound) with a tunable verdict.
   const tunable = ["Gpu", "Cpu", "Vram", "Ram", "Thermal"].includes(b.type);
-  if (r.game && tunable) {
+  if (r.game && r.canApply && tunable) {
     window.__opt = { game: r.game, bottleneck: b.type, goal: $("goal").value };
     html += `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
       <h3 style="font-size:14px;margin:0 0 8px">Appliquer aux fichiers de config</h3>
@@ -302,6 +334,25 @@ $("quit").onclick = async () => {
 
 $("run").onclick = runMonitor;
 
+// ----- Tabs ------------------------------------------------------------------
+let systemLoaded = false;
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    const target = tab.dataset.tab;
+    $("panel-games").classList.toggle("hidden", target !== "games");
+    $("panel-system").classList.toggle("hidden", target !== "system");
+    // The system tab does its heavy scan lazily, the first time it's opened.
+    if (target === "system" && !systemLoaded) {
+      systemLoaded = true;
+      loadHardware();
+      loadSystem();
+      loadTools();
+    }
+  };
+});
+
 async function loadVersion() {
   try {
     const v = await getJson("/api/version");
@@ -309,7 +360,5 @@ async function loadVersion() {
   } catch { /* non-essential */ }
 }
 
-loadHardware();
 loadGames();
-loadTools();
 loadVersion();

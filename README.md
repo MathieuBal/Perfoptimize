@@ -22,6 +22,24 @@ de réglages graphiques.
   contention GPU externe, confiance, plan de session appliqué à l'identique, `tune`)
 - ✅ **Étape 13 — application de bureau** (interface graphique locale, exécutable Windows
   autonome, téléchargement de PresentMon depuis l'interface)
+- ✅ **Étape 14 — détection automatique des jeux + optimisation PC globale** (reconnaissance
+  heuristique des jeux sans profil, interface en deux onglets Jeux / Système, conseiller matériel)
+
+## Détection automatique et optimisation globale
+
+L'interface est organisée en deux onglets :
+
+- **Jeux** : le jeu en cours est détecté même s'il n'a **pas de profil détaillé** —
+  une heuristique reconnaît un jeu à son emplacement d'installation (dossiers
+  Steam, Epic, GOG, Ubisoft, EA, Riot, Battle.net…), en excluant lanceurs,
+  navigateurs et outils. Un jeu inconnu reste **analysable** (mesure attribuée
+  à son processus) et reçoit des conseils génériques et adaptés au matériel ;
+  seuls les jeux avec profil permettent l'application automatique des réglages.
+- **Système** : au-delà d'un jeu précis, un **conseiller matériel**
+  (`SystemAdvisor`) analyse le PC et signale les optimisations globales — RAM
+  en simple canal, 16 Go à l'étroit, profil XMP/EXPO à vérifier, disque système
+  presque plein, absence de SSD, pas de carte dédiée — classées par gravité
+  (à corriger / conseillé / info).
 
 ## Application de bureau (le plus simple)
 

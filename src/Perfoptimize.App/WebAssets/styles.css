@@ -31,6 +31,14 @@ header {
 }
 header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 10px; }
 header .logo { font-size: 22px; }
+.tabs { display: flex; align-items: center; gap: 8px; }
+.tab {
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  padding: 8px 14px; border-radius: 9px; font-weight: 600; cursor: pointer;
+}
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--card); border-color: var(--border); color: var(--text); box-shadow: var(--shadow); }
+.tab-panel { display: grid; gap: 20px; }
 main { max-width: 960px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
 .card {
   background: var(--card); border: 1px solid var(--border); border-radius: 12px;

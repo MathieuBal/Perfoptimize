@@ -44,11 +44,24 @@ app.MapGet("/api/hardware", () =>
 app.MapGet("/api/games", () =>
 {
     var profiles = GameProfileRepository.LoadBuiltIn();
-    var running = new RunningGameDetector().Detect(profiles);
+    var detected = new RunningGameDetector().DetectAny(profiles);
     return Results.Json(new
     {
         known = profiles.Select(p => new { p.Name, executables = p.Executables, settings = p.Settings.Count }),
-        running = running is null ? null : new { running.Profile.Name, running.ProcessId },
+        running = detected is null ? null : new
+        {
+            detected.Name, detected.ProcessId, detected.IsKnown, detected.Reasons,
+        },
+    });
+});
+
+app.MapGet("/api/system", () =>
+{
+    var profile = new HardwareScanner().Scan();
+    var advice = SystemAdvisor.Analyze(profile);
+    return Results.Json(new
+    {
+        advice = advice.Select(a => new { a.Category, a.Title, a.Detail, severity = a.Severity.ToString() }),
     });
 });
 
@@ -61,18 +74,18 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
 
     var hardware = new HardwareScanner().Scan();
     var games = GameProfileRepository.LoadBuiltIn();
-    var running = new RunningGameDetector().Detect(games);
+    var detected = new RunningGameDetector().DetectAny(games);
 
     ISystemTelemetrySource source = OperatingSystem.IsWindows()
         ? new WindowsTelemetrySource(hardware.PrimaryGpu?.VramBytes)
         : PerformanceMonitor.CreateForCurrentPlatform();
 
     Task<FrametimeStatistics?>? presentMon = null;
-    if (running is not null && OperatingSystem.IsWindows() && PresentMonCapture.FindExecutable() is not null)
-        presentMon = PresentMonCapture.CaptureAsync(running.ProcessId, TimeSpan.FromSeconds(seconds));
+    if (detected is not null && OperatingSystem.IsWindows() && PresentMonCapture.FindExecutable() is not null)
+        presentMon = PresentMonCapture.CaptureAsync(detected.ProcessId, TimeSpan.FromSeconds(seconds));
 
     var report = await new PerformanceMonitor(source).CaptureAsync(
-        TimeSpan.FromSeconds(seconds), gameProcessId: running?.ProcessId);
+        TimeSpan.FromSeconds(seconds), gameProcessId: detected?.ProcessId);
     var frametimes = presentMon is not null ? await presentMon : null;
 
     var summary = report.Summary;
@@ -80,7 +93,7 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         hardware.Cpu.LogicalCores > 0 ? hardware.Cpu.LogicalCores : Environment.ProcessorCount);
     var plan = RecommendationEngine.Advise(new AdviceRequest
     {
-        Analysis = analysis, Game = running?.Profile, Goal = goal,
+        Analysis = analysis, Game = detected?.Profile, Goal = goal,
         Hardware = hardware, Summary = summary, Frametimes = frametimes, TargetFps = targetFps,
     });
 
@@ -90,7 +103,7 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         store.Save(new SessionRecord
         {
             StartedAt = DateTimeOffset.Now.AddSeconds(-seconds),
-            GameName = running?.Profile.Name, Bottleneck = analysis.Type, Summary = summary,
+            GameName = detected?.Name, Bottleneck = analysis.Type, Summary = summary,
             TargetFps = plan.TargetFps, AverageFps = frametimes?.AverageFps,
             OnePercentLowFps = frametimes?.OnePercentLowFps,
         });
@@ -99,7 +112,9 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
 
     return Results.Json(new
     {
-        game = running?.Profile.Name,
+        game = detected?.Name,
+        gameKnown = detected?.IsKnown ?? false,
+        canApply = detected?.Profile is not null,
         sampleCount = summary.SampleCount,
         primeSeconds = Math.Round(report.PrimeDuration.TotalSeconds, 1),
         cpu = new { avg = summary.AverageCpuUsagePercent, busiestCore = summary.AverageMaxCoreUsagePercent, gameShare = summary.AverageGameCpuUsagePercent },

@@ -6,6 +6,23 @@ namespace Perfoptimize.Core.Games;
 public sealed record RunningGame(GameProfile Profile, int ProcessId, string ProcessName);
 
 /// <summary>
+/// A game currently running: either a known one (with its profile) or an
+/// unknown one recognised by heuristics (profile null, so no config apply, but
+/// still monitorable and eligible for generic + hardware-aware advice).
+/// </summary>
+public sealed record DetectedGame(
+    string Name, int ProcessId, GameProfile? Profile, bool IsKnown, IReadOnlyList<string> Reasons)
+{
+    /// <summary>A displayable game name from a process name ("eldenring" → "Eldenring").</summary>
+    public static string PrettifyProcessName(string processName)
+    {
+        var name = processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? processName[..^4] : processName;
+        return name.Length == 0 ? processName : char.ToUpperInvariant(name[0]) + name[1..];
+    }
+}
+
+/// <summary>
 /// Finds which known game is currently running by comparing process names with
 /// game profiles. Only reads the process list — never touches game memory,
 /// so anti-cheat systems have nothing to object to.
@@ -40,6 +57,57 @@ public sealed class RunningGameDetector
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Detects the running game: a known profile first, otherwise the best
+    /// heuristic candidate among running processes (unknown game). Returns null
+    /// when nothing game-like is running.
+    /// </summary>
+    public DetectedGame? DetectAny(IReadOnlyList<GameProfile> profiles)
+    {
+        if (Detect(profiles) is { } known)
+            return new DetectedGame(known.Profile.Name, known.ProcessId, known.Profile, IsKnown: true, []);
+
+        DetectedGame? best = null;
+        var bestScore = GameHeuristics.LikelyThreshold - 1;
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                var likelihood = GameHeuristics.Evaluate(
+                    new ProcessInfo(process.ProcessName, TryGetExecutablePath(process)));
+                if (likelihood.IsLikelyGame && likelihood.Score > bestScore)
+                {
+                    bestScore = likelihood.Score;
+                    best = new DetectedGame(
+                        DetectedGame.PrettifyProcessName(process.ProcessName),
+                        process.Id, Profile: null, IsKnown: false, likelihood.Reasons);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Process exited between enumeration and inspection.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Reading the executable path can throw for protected processes.</summary>
+    private static string? TryGetExecutablePath(Process process)
+    {
+        try
+        {
+            return process.MainModule?.FileName;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>"Cyberpunk2077.exe" and "cyberpunk2077" both normalize to "cyberpunk2077".</summary>
