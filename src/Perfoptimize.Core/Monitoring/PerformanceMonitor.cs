@@ -62,28 +62,32 @@ public sealed class PerformanceMonitor
         // The deadline starts AFTER priming: a slow backend should still get its
         // full observation window rather than collecting zero samples.
         var deadline = DateTimeOffset.Now + duration;
+        // A full probe can itself cost close to a step on real hardware (~1.3s of
+        // WMI on a warm system). Pace the wait by the last probe's cost so we
+        // sample about once per step, and never below a small floor that keeps
+        // the CPU-usage delta interval meaningful.
+        var lastSampleCost = primeStopwatch.Elapsed;
+        var floor = TimeSpan.FromMilliseconds(200);
         while (DateTimeOffset.Now < deadline && !cancellationToken.IsCancellationRequested)
         {
+            var wait = step - lastSampleCost;
+            if (wait < floor)
+                wait = floor;
             try
             {
-                await Task.Delay(step, cancellationToken);
+                await Task.Delay(wait, cancellationToken);
             }
             catch (TaskCanceledException)
             {
                 break;
             }
 
-            // Pace by the sample cost: if a probe itself takes ~1s on a slow
-            // machine, don't stack another full step on top — sample as often as
-            // the backend allows instead of losing the whole window.
             var sampleStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var sample = _source.Sample(gameProcessId);
             sampleStopwatch.Stop();
+            lastSampleCost = sampleStopwatch.Elapsed;
             samples.Add(sample);
             onSample?.Report(sample);
-
-            if (sampleStopwatch.Elapsed >= step)
-                deadline = DateTimeOffset.Now; // budget exhausted by probe latency
         }
 
         return new PerformanceReport
