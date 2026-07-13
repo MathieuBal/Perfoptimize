@@ -80,6 +80,78 @@ async function loadGames() {
   }
 }
 
+// ----- Installed-game library ------------------------------------------------
+async function scanLibrary() {
+  const btn = $("scan-library");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span> Analyse du disque…`;
+  try {
+    const r = await getJson("/api/library");
+    if (!r.games.length) {
+      $("library").innerHTML = `<span class="muted">Aucun jeu Steam installé détecté (ou Steam introuvable).</span>`;
+    } else {
+      let html = `<div class="muted" style="font-size:12px;margin-bottom:8px">${r.games.length} jeu(x) installé(s) :</div>`;
+      for (const g of r.games) {
+        const id = "cfg-" + btoa(g.installDir).replace(/[^a-zA-Z0-9]/g, "");
+        html += `<div style="padding:8px 0;border-top:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div><strong>${g.name}</strong> <span class="chip">${g.source}</span>
+              <div class="muted" style="font-size:11px">${g.installDir}</div></div>
+            <button class="ghost" data-dir="${encodeURIComponent(g.installDir)}" data-out="${id}">Voir la config</button>
+          </div>
+          <div id="${id}"></div>
+        </div>`;
+      }
+      $("library").innerHTML = html;
+      $("library").querySelectorAll("button[data-dir]").forEach(b => {
+        b.onclick = () => loadGameConfig(decodeURIComponent(b.dataset.dir), b.dataset.out, b);
+      });
+    }
+  } catch (e) {
+    $("library").innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Rescanner";
+  }
+}
+
+async function loadGameConfig(dir, outId, btn) {
+  const out = $(outId);
+  out.innerHTML = `<span class="spinner"></span> Lecture des fichiers de config…`;
+  btn.disabled = true;
+  try {
+    const r = await getJson("/api/library/config?dir=" + encodeURIComponent(dir));
+    if (!r.ok) { out.innerHTML = `<span class="muted">${r.message}</span>`; return; }
+    if (!r.configs.length) {
+      out.innerHTML = `<span class="muted" style="font-size:13px">Aucun fichier de configuration trouvé pour ce jeu.</span>`;
+      return;
+    }
+    let html = "";
+    for (const c of r.configs) {
+      html += `<div style="margin-top:10px;padding:8px 10px;background:var(--chip);border-radius:8px">
+        <div style="font-size:12px" class="muted">${c.format} · ${c.path}</div>`;
+      if (c.settings.length) {
+        html += `<div class="muted" style="font-size:11px;margin:4px 0">${c.settings.length} réglage(s) graphique(s) sur ${c.totalKeys} clés :</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:3px 14px;font-size:12.5px">`;
+        for (const s of c.settings.slice(0, 40)) {
+          html += `<div style="font-variant-numeric:tabular-nums"><span class="muted">${s.key}</span> = <strong>${s.value}</strong></div>`;
+        }
+        html += `</div>`;
+      } else if (c.format !== "Ini") {
+        html += `<div class="muted" style="font-size:12px;margin-top:4px">Format ${c.format} — lecture des réglages non encore prise en charge, mais le fichier est localisé.</div>`;
+      } else {
+        html += `<div class="muted" style="font-size:12px;margin-top:4px">Aucun réglage graphique reconnu (${c.totalKeys} clés).</div>`;
+      }
+      html += `</div>`;
+    }
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = `<span class="status-off">Erreur : ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ----- System optimization ---------------------------------------------------
 async function loadSystem() {
   try {
@@ -374,6 +446,8 @@ async function loadVersion() {
     $("version").textContent = `· v${v.version}`;
   } catch { /* non-essential */ }
 }
+
+$("scan-library").onclick = scanLibrary;
 
 loadGames();
 loadVersion();

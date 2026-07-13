@@ -26,6 +26,29 @@ de réglages graphiques.
   heuristique des jeux sans profil, interface en deux onglets Jeux / Système, conseiller matériel)
 - ✅ **Étape 15 — sémantique des réglages** (chaque réglage porte une *action* et un *niveau de
   preuve* ; fin de la logique « tout baisser », gains affichés comme théoriques tant que non mesurés)
+- ✅ **Étape 16 — découverte des jeux installés + lecture des configs** (parcours des bibliothèques
+  Steam, localisation et lecture générique des fichiers de configuration, sans profil requis)
+
+## Découverte des jeux installés et de leurs configs
+
+Au-delà des 5 profils détaillés, Perfoptimize peut **parcourir le disque** pour
+découvrir les jeux installés et lire leurs fichiers de configuration :
+
+- **`InstalledGameScanner`** lit les bibliothèques Steam (`libraryfolders.vdf`)
+  et les manifestes d'application (`appmanifest_*.acf`) pour lister les jeux
+  réellement installés, avec leur dossier — sur toutes les bibliothèques
+  (racine Steam découverte via le registre sous Windows) ;
+- **`GameConfigScanner`** cherche les fichiers de config dans le dossier
+  d'installation (parcours borné en profondeur et en nombre) **et** dans les
+  emplacements utilisateur habituels (`Documents\My Games`, `%LOCALAPPDATA%`,
+  `%APPDATA%`, `%LOCALAPPDATA%Low`), en associant les dossiers au jeu par
+  correspondance de nom, puis **extrait les réglages graphiques** des fichiers
+  INI (ombres, textures, résolution, DLSS/FSR, distance d'affichage…).
+
+Dans l'onglet **Jeux**, le bouton « Scanner mes jeux installés » liste les jeux
+découverts ; « Voir la config » affiche les fichiers trouvés et leurs réglages
+graphiques actuels. Les formats JSON/XML sont localisés mais pas encore
+interprétés. La lecture est strictement bornée aux jeux réellement découverts.
 
 ## Sémantique des réglages : ne pas « tout baisser »
 
