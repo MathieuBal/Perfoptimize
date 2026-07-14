@@ -15,11 +15,13 @@ using Perfoptimize.Core.Storage;
 //   perfoptimize scan --json [f]     Print (or save) the hardware profile as JSON.
 //   perfoptimize games               List the known game profiles.
 //   perfoptimize monitor [-d 30] [--goal quality|balanced|performance]
-//                        [--target-fps 60] [--frametimes capture.csv]
+//                        [--target-fps 60] [--frametimes capture.csv] [--diagnose]
 //                                    Detect the running game, sample telemetry,
 //                                    identify the bottleneck and print advice
 //                                    sized to the FPS gap when a PresentMon
 //                                    capture of the session is provided.
+//                                    --diagnose times each telemetry backend
+//                                    (Windows) to find a slow subsystem.
 //   perfoptimize frametimes <csv>    Analyze a PresentMon capture (FPS, 1% low, stutter).
 //   perfoptimize history [game]      Show past monitoring sessions.
 //   perfoptimize config <game>       Locate a game's config files.
@@ -157,6 +159,23 @@ static async Task<int> RunMonitorAsync(string[] args)
     Console.WriteLine(running is null
         ? "No known game detected — monitoring the whole system."
         : $"Detected game: {running.Profile.Name} (pid {running.ProcessId})");
+
+    // --diagnose times each telemetry backend individually, to pinpoint a slow
+    // subsystem (WMI cold-start, hung nvidia-smi) when monitoring collects too
+    // few samples. It samples nothing itself.
+    if (args.Contains("--diagnose"))
+    {
+        if (!OperatingSystem.IsWindows())
+            return Fail("--diagnose times the Windows telemetry backends; not applicable on this OS.");
+        Console.WriteLine("Timing each telemetry subsystem (one probe each)...");
+        Console.WriteLine();
+        foreach (var timing in WindowsTelemetryDiagnostics.Probe(running?.ProcessId))
+            Console.WriteLine($"  {timing.Elapsed.TotalMilliseconds,8:0} ms  {timing.Subsystem} — {timing.Result}");
+        Console.WriteLine();
+        Console.WriteLine("Anything over ~1000 ms is a likely culprit for slow monitoring.");
+        return 0;
+    }
+
     Console.WriteLine($"Sampling for {durationSeconds}s (1 sample/s)... play normally during the capture.");
     Console.WriteLine();
 
@@ -197,6 +216,10 @@ static async Task<int> RunMonitorAsync(string[] args)
     Console.WriteLine();
     Console.WriteLine("=== Summary ===");
     Console.WriteLine($"Samples : {summary.SampleCount} over {summary.Duration.TotalSeconds:0}s");
+    // A slow first probe means the telemetry backend is starving the session.
+    if (report.PrimeDuration.TotalSeconds >= 2)
+        Console.WriteLine($"Warning : the first telemetry probe took {report.PrimeDuration.TotalSeconds:0.0}s — " +
+                          "a backend is slow. Run \"monitor --diagnose\" to find which one.");
     Console.WriteLine($"CPU     : avg {Percent(summary.AverageCpuUsagePercent)}, peak {Percent(summary.PeakCpuUsagePercent)}, " +
                       $"busiest core avg {Percent(summary.AverageMaxCoreUsagePercent)}");
     if (summary.AverageGameCpuUsagePercent is { } gameCpu)
@@ -254,9 +277,15 @@ static async Task<int> RunMonitorAsync(string[] args)
     {
         Console.WriteLine();
         Console.WriteLine($"Recommendations ({goal} goal):");
+        if (plan.MeasuredAverageFps is null)
+            Console.WriteLine("  (gains below are theoretical profile estimates — install PresentMon to measure them)");
         foreach (var recommendation in plan.Recommendations)
         {
-            var gain = recommendation.ExpectedGainPercent is { } g ? $" (~+{g:0}%)" : "";
+            string gain = "";
+            if (recommendation.ExpectedGainPercent is { } g)
+                gain = recommendation.Evidence == EvidenceLevel.LocallyMeasured
+                    ? $" (~+{g:0}% measured)"
+                    : $" (up to ~+{g:0}% theoretical)";
             Console.WriteLine($"- {recommendation.Title}{gain}");
             Console.WriteLine($"    {recommendation.Reason}");
         }
@@ -516,7 +545,7 @@ static int RunApply(string[] args)
         var recommendations = RecommendationEngine.Recommend(
             new BottleneckAnalysis { Type = bottleneck }, game, goal);
         settingsToLower = recommendations
-            .Where(r => r.Setting is not null)
+            .Where(r => r.Setting is { } s && s.IsAutoLowerable)
             .Select(r => r.Setting!)
             .ToList();
     }
@@ -566,7 +595,7 @@ static List<StoredRecommendation> SnapshotPlan(AdvicePlan plan, GameProfile? gam
     if (game is not null)
     {
         var boundSettings = plan.Recommendations
-            .Where(r => r.Setting?.Config is not null)
+            .Where(r => r.Setting is { Config: not null } s && s.IsAutoLowerable)
             .Select(r => r.Setting!)
             .ToList();
         if (boundSettings.Count > 0)
@@ -692,9 +721,9 @@ static GameSetting? PickTuneSetting(GameProfile game, BottleneckType bottleneck,
     };
     return plan.Recommendations
                .Select(r => r.Setting)
-               .FirstOrDefault(s => s?.Config is not null)
+               .FirstOrDefault(s => s is { Config: not null } && s.IsAutoLowerable)
            ?? game.Settings
-               .Where(s => s.Config is not null && relevantImpacts.Contains(s.Impact))
+               .Where(s => s.Config is not null && s.IsAutoLowerable && relevantImpacts.Contains(s.Impact))
                .OrderByDescending(s => s.PerformanceGain - s.QualityLoss)
                .FirstOrDefault();
 }
@@ -998,8 +1027,13 @@ static void PrintHardwareReport(HardwareProfile profile)
     Console.WriteLine();
 
     Console.WriteLine($"CPU     : {profile.Cpu.Name}");
+    // WMI reports the BASE clock, not the boost — saying "up to" would be wrong
+    // (an i7-10700K shows 3.8 GHz here but boosts to 5.1). Invariant culture
+    // keeps the report's number format consistent regardless of OS language.
     Console.WriteLine($"          {profile.Cpu.PhysicalCores} cores / {profile.Cpu.LogicalCores} threads" +
-                      (profile.Cpu.MaxClockMhz is { } clock ? $", up to {clock / 1000.0:0.0} GHz" : ""));
+                      (profile.Cpu.MaxClockMhz is { } clock
+                          ? $", base {(clock / 1000.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} GHz"
+                          : ""));
 
     if (profile.Gpus.Count == 0)
     {

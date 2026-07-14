@@ -20,6 +20,139 @@ de réglages graphiques.
   throttling confirmé par le pilote, PresentMon intégré à `monitor`)
 - ✅ **Étape 12 — diagnostic v3 et boucle mesurée** (attribution utilisée dans les verdicts,
   contention GPU externe, confiance, plan de session appliqué à l'identique, `tune`)
+- ✅ **Étape 13 — application de bureau** (interface graphique locale, exécutable Windows
+  autonome, téléchargement de PresentMon depuis l'interface)
+- ✅ **Étape 14 — détection automatique des jeux + optimisation PC globale** (reconnaissance
+  heuristique des jeux sans profil, interface en deux onglets Jeux / Système, conseiller matériel)
+- ✅ **Étape 15 — sémantique des réglages** (chaque réglage porte une *action* et un *niveau de
+  preuve* ; fin de la logique « tout baisser », gains affichés comme théoriques tant que non mesurés)
+- ✅ **Étape 16 — découverte des jeux installés + lecture des configs** (parcours des bibliothèques
+  Steam, localisation et lecture générique des fichiers de configuration, sans profil requis)
+- ✅ **Étape 17 — scan multi-disques, Epic, et réglages à éviter** (toutes les bibliothèques Steam
+  de tous les disques + Epic Games ; base de connaissances communautaire des réglages problématiques)
+
+## Réglages à éviter (connaissance communautaire)
+
+Certains réglages sont mal optimisés : la communauté sait qu'il vaut mieux ne
+pas les activer (crashs, saccades, coût disproportionné). Perfoptimize porte
+désormais cette connaissance dans les profils, sous forme d'**avisories**
+affichées **spontanément** à chaque analyse, quel que soit le goulot :
+
+- Witcher 3 : *HairWorks* (peu rentable), *ray tracing next-gen* (saccades de traversée) ;
+- Cyberpunk 2077 : *réflexions Psycho* (peu rentable), *densité de foule élevée* (à-coups CPU) ;
+- Elden Ring : *ray tracing* (saccades, jeu déjà plafonné à 60) ;
+- GTA V : *MSAA* en 1440p/4K (peu rentable), *distance d'affichage étendue* (à-coups).
+
+Chaque avisory porte un **type** (crash / saccades / peu rentable), une action
+recommandée, une explication et un niveau de preuve (`communityValidated`).
+
+## Scan multi-disques
+
+Le scan des jeux installés couvre maintenant **tous les disques fixes** : il
+sonde chaque lecteur pour les bibliothèques Steam (`SteamLibrary`, `Steam`,
+`Games\SteamLibrary`…), en plus de la racine Steam du registre, et ajoute les
+jeux **Epic Games** (manifestes `.item`). Un jeu installé sur D:/K:/… est donc
+détecté même s'il n'est pas dans la bibliothèque Steam par défaut.
+
+## Découverte des jeux installés et de leurs configs
+
+Au-delà des 5 profils détaillés, Perfoptimize peut **parcourir le disque** pour
+découvrir les jeux installés et lire leurs fichiers de configuration :
+
+- **`InstalledGameScanner`** lit les bibliothèques Steam (`libraryfolders.vdf`)
+  et les manifestes d'application (`appmanifest_*.acf`) pour lister les jeux
+  réellement installés, avec leur dossier — sur toutes les bibliothèques
+  (racine Steam découverte via le registre sous Windows) ;
+- **`GameConfigScanner`** cherche les fichiers de config dans le dossier
+  d'installation (parcours borné en profondeur et en nombre) **et** dans les
+  emplacements utilisateur habituels (`Documents\My Games`, `%LOCALAPPDATA%`,
+  `%APPDATA%`, `%LOCALAPPDATA%Low`), en associant les dossiers au jeu par
+  correspondance de nom, puis **extrait les réglages graphiques** des fichiers
+  INI (ombres, textures, résolution, DLSS/FSR, distance d'affichage…).
+
+Dans l'onglet **Jeux**, le bouton « Scanner mes jeux installés » liste les jeux
+découverts ; « Voir la config » affiche les fichiers trouvés et leurs réglages
+graphiques actuels. Les formats JSON/XML sont localisés mais pas encore
+interprétés. La lecture est strictement bornée aux jeux réellement découverts.
+
+## Sémantique des réglages : ne pas « tout baisser »
+
+Tous les réglages ne s'optimisent pas en les baissant. Chaque `GameSetting`
+porte désormais :
+
+- une **action** : `lower` (baisser d'un cran), `disable` (désactiver, ex. ray
+  tracing), **`keepEnabled`** (à laisser activé — ex. *Engine Multithreading*
+  de Path of Exile, dont la désactivation nuit souvent aux perfs),
+  `testAlternatives` (à départager par un test A/B mesuré, ex. renderer
+  DX11/DX12/Vulkan), `manualOnly` (à changer dans le menu du jeu) ;
+- un **niveau de preuve** : `estimated` (estimation du profil, non vérifiée),
+  `communityValidated`, `benchmarked`, `locallyMeasured` (mesuré sur ta
+  machine via la boucle `tune`).
+
+Conséquences : un réglage `keepEnabled` n'est **jamais** proposé à la baisse ;
+si un jeu connu n'a aucun réglage sûr pour le goulot, l'assistant le **dit**
+plutôt que d'inventer des conseils génériques (Path of Exile n'a ni foule ni
+distance d'affichage) ; et tant qu'aucune mesure PresentMon n'existe, les gains
+sont affichés comme **théoriques** (« jusqu'à ~X % selon le profil »), pas comme
+un résultat personnalisé. La confiance du diagnostic (`suspecté` vs `confirmé`)
+est mise en avant dans l'interface.
+
+## Détection automatique et optimisation globale
+
+L'interface est organisée en deux onglets :
+
+- **Jeux** : le jeu en cours est détecté même s'il n'a **pas de profil détaillé** —
+  une heuristique reconnaît un jeu à son emplacement d'installation (dossiers
+  Steam, Epic, GOG, Ubisoft, EA, Riot, Battle.net…), en excluant lanceurs,
+  navigateurs et outils. Un jeu inconnu reste **analysable** (mesure attribuée
+  à son processus) et reçoit des conseils génériques et adaptés au matériel ;
+  seuls les jeux avec profil permettent l'application automatique des réglages.
+- **Système** : au-delà d'un jeu précis, un **conseiller matériel**
+  (`SystemAdvisor`) analyse le PC et signale les optimisations globales — RAM
+  en simple canal, 16 Go à l'étroit, profil XMP/EXPO à vérifier, disque système
+  presque plein, absence de SSD, pas de carte dédiée — classées par gravité
+  (à corriger / conseillé / info).
+
+## Application de bureau (le plus simple)
+
+Pour un usage sans ligne de commande, Perfoptimize se compile en **un seul
+exécutable Windows autonome** — le runtime .NET est inclus, rien d'autre à
+installer.
+
+```powershell
+# Depuis le dossier du projet, sur Windows :
+powershell -ExecutionPolicy Bypass -File scripts\build-windows-exe.ps1
+# → produit dist\Perfoptimize.exe
+```
+
+L'exécutable est produit dans **`dist\Perfoptimize.exe`**. Double-clique
+dessus : il démarre un petit serveur local et ouvre un tableau de bord dans ton
+navigateur (garde la fenêtre ouverte pendant l'utilisation ; le bouton
+« Quitter » l'arrête). L'interface permet de :
+
+- voir le **matériel détecté** (CPU, GPU, VRAM, RAM, écran) ;
+- voir le **jeu en cours** parmi les jeux reconnus ;
+- lancer une **analyse** (durée, objectif qualité/équilibré/performance, FPS
+  visés) et lire le goulot, les métriques et les recommandations ;
+- **appliquer les réglages** aux fichiers de config directement depuis
+  l'interface : aperçu (rien n'est écrit), application (jeu fermé exigé,
+  sauvegarde automatique), et restauration en un clic — avec les mêmes
+  garde-fous que la CLI (verdicts externes refusés) ;
+- **télécharger et installer PresentMon** en un clic (mesure des vrais FPS),
+  depuis la source officielle Intel (`GameTechDev/PresentMon`).
+
+La logique métier est entièrement partagée avec la CLI (projet
+`Perfoptimize.Core`) : l'interface n'est qu'une façade, le moteur est le même.
+Pour développer l'UI sans produire l'exe : `dotnet run --project src/Perfoptimize.App`.
+
+### Mettre à jour
+
+Comme le projet se construit depuis un clone git, une mise à jour récupère le
+code puis reconstruit l'exe (ferme d'abord l'application) :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1
+```
 
 ### Étape 1 : détection matérielle
 

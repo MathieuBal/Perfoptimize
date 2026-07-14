@@ -54,9 +54,17 @@ public static class NvidiaSmi
             });
             if (process is null)
                 return null;
-            var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(5000);
-            var firstLine = output.Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
+
+            // ReadToEnd() blocks until stdout closes and has no timeout — a
+            // hung nvidia-smi (recent drivers, GPU busy) would freeze the whole
+            // sampling loop. Read asynchronously and kill on timeout instead.
+            var readTask = process.StandardOutput.ReadToEndAsync();
+            if (!readTask.Wait(TimeSpan.FromSeconds(3)) || !process.WaitForExit(3000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
+                return null;
+            }
+            var firstLine = readTask.Result.Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
             return firstLine is null ? null : ParseLine(firstLine);
         }
         catch

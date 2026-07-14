@@ -13,6 +13,11 @@ public sealed class Recommendation
     public GameSetting? Setting { get; init; }
     /// <summary>Estimated FPS gain in percent; null when unquantified.</summary>
     public double? ExpectedGainPercent { get; init; }
+    /// <summary>
+    /// How trustworthy the gain is. Anything below <see cref="EvidenceLevel.LocallyMeasured"/>
+    /// must be shown as theoretical, never as a personalized result.
+    /// </summary>
+    public EvidenceLevel Evidence { get; init; } = EvidenceLevel.Estimated;
 }
 
 /// <summary>What the player wants to preserve when trading quality for FPS.</summary>
@@ -54,6 +59,8 @@ public sealed class AdvicePlan
     public IReadOnlyList<Recommendation> Recommendations { get; init; } = [];
     /// <summary>Context the player should know (frame caps, out-of-reach targets, ...).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
+    /// <summary>Community-documented settings to avoid for this game — shown proactively.</summary>
+    public IReadOnlyList<SettingAdvisory> Advisories { get; init; } = [];
 }
 
 /// <summary>
@@ -105,11 +112,15 @@ public static class RecommendationEngine
             ? Math.Max(0, Math.Round((targetFps / measuredFps.Value - 1) * 100, 1))
             : null;
 
+        // Community-documented "settings to avoid" are shown regardless of the
+        // bottleneck — they prevent crashes and stutter, not just low FPS.
+        var advisories = request.Game?.Advisories ?? [];
+
         // 2. Target already met on average: the problem, if any, is smoothness.
         if (requiredGain is 0)
         {
             recommendations.AddRange(StutterAdvice(request, targetFps, notes));
-            return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes);
+            return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes, advisories);
         }
 
         // 3. Setting suggestions from the game profile, sized to the gap when known.
@@ -134,12 +145,13 @@ public static class RecommendationEngine
                       "the resolution, or upgrading the limiting component.");
         }
 
-        return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes);
+        return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes, advisories);
     }
 
     private static AdvicePlan BuildPlan(
         int targetFps, double? measuredFps, double? requiredGain,
-        List<Recommendation> recommendations, List<string> notes)
+        List<Recommendation> recommendations, List<string> notes,
+        IReadOnlyList<SettingAdvisory> advisories)
     {
         // Individual estimates interact (relieving the GPU changes what the next
         // setting can gain), so a sum is an optimistic ceiling. Report a range
@@ -167,6 +179,7 @@ public static class RecommendationEngine
             EstimatedGainHighPercent = high,
             Recommendations = recommendations,
             Notes = notes,
+            Advisories = advisories,
         };
     }
 
@@ -188,8 +201,13 @@ public static class RecommendationEngine
         }
 
         var relevantImpacts = RelevantImpacts(request.Analysis.Type);
-        var candidates = game.Settings
-            .Where(s => relevantImpacts.Contains(s.Impact) && s.PerformanceGain > 0)
+        var relevant = game.Settings.Where(s => relevantImpacts.Contains(s.Impact)).ToList();
+
+        // Only settings meant to be lowered/disabled are candidates. A
+        // KeepEnabled setting (e.g. Engine Multithreading) must NEVER be
+        // recommended to lower — doing so was the core correctness bug.
+        var candidates = relevant
+            .Where(s => s.IsAutoLowerable && s.PerformanceGain > 0)
             .Where(s => request.Goal != OptimizationGoal.Quality || s.QualityLoss <= 2)
             .OrderByDescending(s => Score(s, request.Goal))
             .ThenByDescending(s => s.PerformanceGain)
@@ -204,15 +222,62 @@ public static class RecommendationEngine
 
         foreach (var setting in selected)
         {
+            var verb = setting.Action == SettingAction.Disable ? "disable" : "lower";
+            var step = setting.Action == SettingAction.Disable ? "" : " by one step";
             yield return new Recommendation
             {
-                Title = $"{game.Name}: lower \"{setting.Name}\" by one step",
-                Reason = $"Typical gain {setting.PerformanceGain}/5 for a visual cost of {setting.QualityLoss}/5.",
+                Title = $"{game.Name}: {verb} \"{setting.Name}\"{step}",
+                Reason = $"Typical gain {setting.PerformanceGain}/5 for a visual cost of {setting.QualityLoss}/5 " +
+                         $"({EvidenceText(setting.Evidence)}).",
                 Setting = setting,
+                Evidence = setting.Evidence,
                 ExpectedGainPercent = setting.EstimatedGainPercent > 0 ? setting.EstimatedGainPercent : null,
             };
         }
+
+        // Settings that shouldn't be lowered but matter to this bottleneck get an
+        // honest note instead of silence: keep-on, or measured A/B only.
+        foreach (var setting in relevant.Where(s => s.Action == SettingAction.KeepEnabled))
+        {
+            yield return new Recommendation
+            {
+                Title = $"{game.Name}: leave \"{setting.Name}\" enabled",
+                Reason = "This setting generally helps performance when on — do not disable it as an " +
+                         "optimization (only as a deliberate, measured troubleshooting test).",
+                Setting = setting,
+            };
+        }
+        foreach (var setting in relevant.Where(s => s.Action == SettingAction.TestAlternatives))
+        {
+            yield return new Recommendation
+            {
+                Title = $"{game.Name}: A/B-test \"{setting.Name}\"",
+                Reason = "Which option is fastest depends on your hardware and drivers — compare them " +
+                         "with a measured before/after in the same scene, don't assume.",
+                Setting = setting,
+            };
+        }
+
+        // Known game, right bottleneck, but nothing safe to auto-lower: say so
+        // plainly rather than falling back to advice invented for other games.
+        if (candidates.Count == 0)
+        {
+            yield return new Recommendation
+            {
+                Title = $"No validated {request.Analysis.Type} setting is documented for {game.Name}",
+                Reason = "Its profile lists no setting that can be safely lowered for this bottleneck. " +
+                         "Prefer a measured A/B test over guessing, and keep performance-helping options on.",
+            };
+        }
     }
+
+    private static string EvidenceText(EvidenceLevel evidence) => evidence switch
+    {
+        EvidenceLevel.LocallyMeasured => "measured on your machine",
+        EvidenceLevel.Benchmarked => "from published benchmarks",
+        EvidenceLevel.CommunityValidated => "commonly recommended",
+        _ => "profile estimate, unverified",
+    };
 
     /// <summary>
     /// Picks the subset of settings whose summed estimated gain covers the gap
@@ -515,14 +580,20 @@ public static class RecommendationEngine
 
     private static IEnumerable<Recommendation> GenericAdvice(AdviceRequest request, double? measuredFps)
     {
+        // When a game profile is present it is authoritative for which SETTINGS to
+        // change; generic "lower X" advice invented for other games must not leak
+        // in (the profile already covers, or deliberately omits, those settings).
+        var knownGame = request.Game is not null;
+
         switch (request.Analysis.Type)
         {
             case BottleneckType.Gpu:
-                yield return new Recommendation
-                {
-                    Title = "Disable ray tracing if enabled",
-                    Reason = "Ray tracing is usually the single most expensive GPU setting.",
-                };
+                if (!knownGame)
+                    yield return new Recommendation
+                    {
+                        Title = "Disable ray tracing if enabled",
+                        Reason = "Ray tracing is usually the single most expensive GPU setting.",
+                    };
                 break;
 
             case BottleneckType.ExternalGpuLoad:
@@ -570,12 +641,15 @@ public static class RecommendationEngine
                 break;
 
             case BottleneckType.Cpu:
-                yield return new Recommendation
-                {
-                    Title = "Lower CPU-heavy settings: crowd density, draw distance, physics",
-                    Reason = "These reduce simulation and draw-call work; resolution changes and " +
-                             "upscaling will not help a CPU limit.",
-                };
+                // Only for unknown games: a known profile lists the game's real
+                // CPU settings (PoE has no crowds/draw-distance, so don't claim it).
+                if (!knownGame)
+                    yield return new Recommendation
+                    {
+                        Title = "Lower CPU-heavy settings such as crowd density, draw distance or physics",
+                        Reason = "These reduce simulation and draw-call work; resolution changes and " +
+                                 "upscaling will not help a CPU limit. Check which of these your game exposes.",
+                    };
                 yield return new Recommendation
                 {
                     Title = "Close background applications (browser, launchers, overlays)",
