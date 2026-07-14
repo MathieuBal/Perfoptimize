@@ -7,18 +7,40 @@
   ],
   "advisories": [
     {
+      "id": "cyberpunk-ssr-psycho",
       "setting": "Screen Space Reflections : Psycho",
       "kind": "poorValue",
-      "recommendation": "Rester sur Élevé plutôt que Psycho/Fou",
-      "detail": "Le mode Psycho des réflexions coûte énormément de FPS pour une différence à peine visible. Élevé offre presque le même rendu sans le coût.",
-      "evidence": "communityValidated"
+      "conditions": [
+        { "key": "ScreenSpaceReflectionsQuality", "operator": "greaterThanOrEqual", "value": "3" }
+      ],
+      "priorityWhen": [
+        { "system": "bottleneck", "operator": "equals", "value": "Gpu" }
+      ],
+      "recommendation": { "action": "lower", "targetValue": "2" },
+      "recommendationText": "Rester sur Élevé plutôt que Psycho/Fou",
+      "detail": "Le mode Psycho des réflexions coûte énormément de FPS pour une différence à peine visible.",
+      "evidence": {
+        "level": "curatedCommunityClaim", "sources": [], "lastVerified": "2026-07-14", "gameVersions": []
+      },
+      "automaticApplication": false
     },
     {
+      "id": "cyberpunk-crowd-density",
       "setting": "Densité de foule : Élevée",
       "kind": "stutter",
-      "recommendation": "Moyenne si le CPU sature en ville",
-      "detail": "En ville, une foule élevée charge fortement le CPU et provoque des à-coups sur les processeurs à cœurs limités. Moyenne lisse l'expérience.",
-      "evidence": "communityValidated"
+      "conditions": [
+        { "key": "CrowdDensity", "operator": "greaterThanOrEqual", "value": "2" }
+      ],
+      "priorityWhen": [
+        { "system": "bottleneck", "operator": "equals", "value": "Cpu" }
+      ],
+      "recommendation": { "action": "lower", "targetValue": "1" },
+      "recommendationText": "Moyenne si le CPU sature en ville",
+      "detail": "En ville, une foule élevée charge fortement le CPU et provoque des à-coups sur les processeurs à cœurs limités.",
+      "evidence": {
+        "level": "curatedCommunityClaim", "sources": [], "lastVerified": "2026-07-14", "gameVersions": []
+      },
+      "automaticApplication": false
     }
   ],
   "settings": [

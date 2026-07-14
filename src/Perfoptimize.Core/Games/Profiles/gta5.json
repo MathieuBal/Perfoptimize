@@ -7,18 +7,26 @@
   ],
   "advisories": [
     {
+      "id": "gta5-msaa-high-resolution",
       "setting": "MSAA",
       "kind": "poorValue",
-      "recommendation": "Éviter en 1440p/4K, préférer FXAA/TAA",
-      "detail": "Le MSAA est extrêmement coûteux au-delà du 1080p et peut dégrader la régularité des frametimes. FXAA ou TAA offrent un bien meilleur rapport qualité/perfs.",
-      "evidence": "communityValidated"
-    },
-    {
-      "setting": "Extended Distance Scaling",
-      "kind": "stutter",
-      "recommendation": "Garder bas",
-      "detail": "Pousser la distance d'affichage étendue charge fortement le CPU et provoque des à-coups en conduite rapide. À garder bas.",
-      "evidence": "communityValidated"
+      "conditions": [
+        { "key": "MSAA", "operator": "greaterThan", "value": "0" },
+        { "system": "resolutionWidth", "operator": "greaterThanOrEqual", "value": "2560" }
+      ],
+      "priorityWhen": [
+        { "system": "bottleneck", "operator": "equals", "value": "Gpu" }
+      ],
+      "recommendation": { "action": "lower", "targetValue": "0" },
+      "recommendationText": "Réduire (FXAA/TAA) en 1440p et au-delà",
+      "detail": "Le MSAA est extrêmement coûteux au-delà du 1080p et peut dégrader la régularité des frametimes. FXAA/TAA offrent un bien meilleur rapport qualité/perfs.",
+      "evidence": {
+        "level": "curatedCommunityClaim",
+        "sources": [],
+        "lastVerified": "2026-07-14",
+        "gameVersions": []
+      },
+      "automaticApplication": false
     }
   ],
   "settings": [

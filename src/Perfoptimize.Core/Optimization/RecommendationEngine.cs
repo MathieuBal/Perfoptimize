@@ -44,6 +44,13 @@ public sealed class AdviceRequest
     public FrametimeStatistics? Frametimes { get; init; }
     /// <summary>The FPS the player wants to reach; defaults to 60.</summary>
     public int? TargetFps { get; init; }
+    /// <summary>
+    /// The game's CURRENT config values (key → value), read from its config
+    /// files. Enables contextual advisories: only flag a known-bad setting when
+    /// it is actually active. Null means "config unread" (advisories become
+    /// "cannot verify" rather than firing blindly).
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ConfigValues { get; init; }
 }
 
 public sealed class AdvicePlan
@@ -59,8 +66,11 @@ public sealed class AdvicePlan
     public IReadOnlyList<Recommendation> Recommendations { get; init; } = [];
     /// <summary>Context the player should know (frame caps, out-of-reach targets, ...).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
-    /// <summary>Community-documented settings to avoid for this game — shown proactively.</summary>
-    public IReadOnlyList<SettingAdvisory> Advisories { get; init; } = [];
+    /// <summary>
+    /// Community advisories evaluated against the player's actual config and
+    /// hardware — each with a status (triggered / already ok / cannot verify).
+    /// </summary>
+    public IReadOnlyList<EvaluatedAdvisory> Advisories { get; init; } = [];
 }
 
 /// <summary>
@@ -112,9 +122,10 @@ public static class RecommendationEngine
             ? Math.Max(0, Math.Round((targetFps / measuredFps.Value - 1) * 100, 1))
             : null;
 
-        // Community-documented "settings to avoid" are shown regardless of the
-        // bottleneck — they prevent crashes and stutter, not just low FPS.
-        var advisories = request.Game?.Advisories ?? [];
+        // Community-documented "settings to avoid", evaluated against the player's
+        // ACTUAL config + hardware + bottleneck: only a genuinely-active, relevant
+        // problem is flagged; the rest read as already-ok or cannot-verify.
+        var advisories = EvaluateAdvisories(request, measuredFps, targetFps);
 
         // 2. Target already met on average: the problem, if any, is smoothness.
         if (requiredGain is 0)
@@ -148,10 +159,64 @@ public static class RecommendationEngine
         return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes, advisories);
     }
 
+    private static IReadOnlyList<EvaluatedAdvisory> EvaluateAdvisories(
+        AdviceRequest request, double? measuredFps, int targetFps)
+    {
+        if (request.Game is not { Advisories.Count: > 0 } game)
+            return [];
+
+        var primaryDisplay = request.Hardware?.Displays.FirstOrDefault(d => d.IsPrimary)
+                             ?? request.Hardware?.Displays.FirstOrDefault();
+        var vramBytes = request.Hardware?.PrimaryGpu?.VramBytes;
+
+        // The GAME's rendering resolution, not the monitor's, is what makes a
+        // setting like MSAA costly: a 1440p screen can run the game at 1080p, in a
+        // window, or with dynamic resolution. Prefer the resolution declared in the
+        // config; fall back to the display only when the config doesn't state one.
+        var (configWidth, configHeight) = ResolutionFromConfig(request.ConfigValues);
+        var context = new AdvisoryContext
+        {
+            ConfigValues = request.ConfigValues ?? new Dictionary<string, string>(),
+            ResolutionWidth = configWidth ?? primaryDisplay?.WidthPixels,
+            ResolutionHeight = configHeight ?? primaryDisplay?.HeightPixels,
+            VramGiB = vramBytes is > 0 ? vramBytes.Value / 1024.0 / 1024.0 / 1024.0 : null,
+            Bottleneck = request.Analysis.Type,
+            TargetMet = measuredFps is { } fps ? fps >= targetFps : null,
+        };
+        return AdvisoryEvaluator.EvaluateAll(game.Advisories, context);
+    }
+
+    /// <summary>
+    /// Reads the game's own rendering resolution from its config, trying the key
+    /// names games actually use. Returns (null, null) when none is present, so the
+    /// caller can fall back to the display resolution.
+    /// </summary>
+    private static (int? Width, int? Height) ResolutionFromConfig(
+        IReadOnlyDictionary<string, string>? config)
+    {
+        if (config is null)
+            return (null, null);
+
+        string[] widthKeys = ["resolution_width", "ResolutionWidth", "width", "ScreenWidth", "DisplayWidth", "iScreenWidth"];
+        string[] heightKeys = ["resolution_height", "ResolutionHeight", "height", "ScreenHeight", "DisplayHeight", "iScreenHeight"];
+        return (FirstInt(config, widthKeys), FirstInt(config, heightKeys));
+    }
+
+    private static int? FirstInt(IReadOnlyDictionary<string, string> config, string[] keys)
+    {
+        foreach (var key in keys)
+            if (config.TryGetValue(key, out var raw) &&
+                int.TryParse(raw, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var value) &&
+                value > 0)
+                return value;
+        return null;
+    }
+
     private static AdvicePlan BuildPlan(
         int targetFps, double? measuredFps, double? requiredGain,
         List<Recommendation> recommendations, List<string> notes,
-        IReadOnlyList<SettingAdvisory> advisories)
+        IReadOnlyList<EvaluatedAdvisory> advisories)
     {
         // Individual estimates interact (relieving the GPU changes what the next
         // setting can gain), so a sum is an optimistic ceiling. Report a range

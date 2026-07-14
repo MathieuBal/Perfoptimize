@@ -15,9 +15,9 @@ public class AdvisoryTests
         [
             new SettingAdvisory
             {
-                Setting = "HairWorks", Kind = AdvisoryKind.PoorValue,
-                Recommendation = "Disable", Detail = "Expensive for little gain.",
-                Evidence = EvidenceLevel.CommunityValidated,
+                Id = "test-hairworks", Setting = "HairWorks", Kind = AdvisoryKind.PoorValue,
+                Conditions = [new AdvisoryCondition { Key = "HairWorksLevel", Operator = ConditionOperator.IsOn }],
+                RecommendationText = "Disable", Detail = "Expensive for little gain.",
             },
         ],
         Settings =
@@ -26,37 +26,38 @@ public class AdvisoryTests
         ],
     };
 
-    [Fact]
-    public void Advisories_are_surfaced_regardless_of_the_bottleneck()
-    {
-        foreach (var type in new[] { BottleneckType.Gpu, BottleneckType.Cpu, BottleneckType.None })
+    private static AdvicePlan Advise(BottleneckType type, Dictionary<string, string>? config) =>
+        RecommendationEngine.Advise(new AdviceRequest
         {
-            var plan = RecommendationEngine.Advise(new AdviceRequest
-            {
-                Analysis = new BottleneckAnalysis { Type = type },
-                Game = GameWithAdvisory(),
-            });
-            Assert.Contains(plan.Advisories, a => a.Setting == "HairWorks");
-        }
+            Analysis = new BottleneckAnalysis { Type = type },
+            Game = GameWithAdvisory(),
+            ConfigValues = config,
+        });
+
+    [Fact]
+    public void An_active_problematic_setting_is_triggered()
+    {
+        var plan = Advise(BottleneckType.Gpu, new() { ["HairWorksLevel"] = "2" });
+
+        var a = Assert.Single(plan.Advisories);
+        Assert.Equal(AdvisoryStatus.Triggered, a.Status);
+        Assert.Equal("2", a.CurrentValue);
     }
 
     [Fact]
-    public void Advisories_appear_even_when_the_fps_target_is_already_met()
+    public void A_disabled_problematic_setting_reads_as_already_ok()
     {
-        var plan = RecommendationEngine.Advise(new AdviceRequest
-        {
-            Analysis = new BottleneckAnalysis { Type = BottleneckType.Gpu },
-            Game = GameWithAdvisory(),
-            Frametimes = new Perfoptimize.Core.Monitoring.Frametimes.FrametimeStatistics
-            {
-                FrameCount = 500, AverageFps = 120, OnePercentLowFps = 100,
-                AverageFrametimeMs = 8.3, WorstFrametimeMs = 12, StutterCount = 0, StutterPercent = 0,
-            },
-            TargetFps = 60,
-        });
+        var plan = Advise(BottleneckType.Gpu, new() { ["HairWorksLevel"] = "0" });
 
-        Assert.Equal(0, plan.RequiredGainPercent);
-        Assert.Contains(plan.Advisories, a => a.Setting == "HairWorks");
+        Assert.Equal(AdvisoryStatus.AlreadyOk, Assert.Single(plan.Advisories).Status);
+    }
+
+    [Fact]
+    public void An_unreadable_setting_reads_as_cannot_verify()
+    {
+        var plan = Advise(BottleneckType.Gpu, new()); // no HairWorksLevel key
+
+        Assert.Equal(AdvisoryStatus.CannotVerify, Assert.Single(plan.Advisories).Status);
     }
 
     [Fact]
@@ -71,17 +72,58 @@ public class AdvisoryTests
     }
 
     [Fact]
-    public void Built_in_profiles_carry_community_advisories()
+    public void The_games_config_resolution_is_preferred_over_the_screen()
+    {
+        // Screen is 1080p but the game renders at 1440p (config says so): an MSAA
+        // advisory gated on resolutionWidth>=2560 must fire on the GAME resolution.
+        var game = new GameProfile
+        {
+            Name = "Res Test", Executables = ["res.exe"], Upscalers = [],
+            Advisories =
+            [
+                new SettingAdvisory
+                {
+                    Id = "msaa", Setting = "MSAA", Kind = AdvisoryKind.PoorValue,
+                    Conditions =
+                    [
+                        new AdvisoryCondition { Key = "MSAA", Operator = ConditionOperator.GreaterThan, Value = "0" },
+                        new AdvisoryCondition { System = "resolutionWidth", Operator = ConditionOperator.GreaterThanOrEqual, Value = "2560" },
+                    ],
+                },
+            ],
+            Settings = [new GameSetting { Name = "Shadows", Impact = SettingImpact.Gpu, QualityLoss = 2, PerformanceGain = 4 }],
+        };
+        var hardware = new Perfoptimize.Core.Hardware.HardwareProfile
+        {
+            Displays = [new Perfoptimize.Core.Hardware.DisplayInfo { WidthPixels = 1920, HeightPixels = 1080, IsPrimary = true }],
+        };
+
+        var plan = RecommendationEngine.Advise(new AdviceRequest
+        {
+            Analysis = new BottleneckAnalysis { Type = BottleneckType.Gpu },
+            Game = game,
+            Hardware = hardware,
+            ConfigValues = new Dictionary<string, string>
+            {
+                ["MSAA"] = "4", ["resolution_width"] = "2560", ["resolution_height"] = "1440",
+            },
+        });
+
+        Assert.Equal(AdvisoryStatus.Triggered, Assert.Single(plan.Advisories).Status);
+    }
+
+    [Fact]
+    public void Built_in_profiles_carry_structured_advisories()
     {
         var profiles = GameProfileRepository.LoadBuiltIn();
 
         var witcher = profiles.First(p => p.Name.StartsWith("The Witcher"));
-        Assert.Contains(witcher.Advisories, a => a.Setting.Contains("HairWorks"));
-        Assert.All(witcher.Advisories, a =>
-        {
-            Assert.False(string.IsNullOrWhiteSpace(a.Recommendation));
-            Assert.False(string.IsNullOrWhiteSpace(a.Detail));
-        });
+        var hairworks = witcher.Advisories.First(a => a.Setting.Contains("HairWorks"));
+        Assert.NotEmpty(hairworks.Conditions);
+        Assert.False(string.IsNullOrWhiteSpace(hairworks.RecommendationText));
+        Assert.Equal("2026-07-14", hairworks.Evidence.LastVerified);
+        // Honest default: single-curator claims are not "community validated".
+        Assert.Equal(AdvisoryEvidenceLevel.CuratedCommunityClaim, hairworks.Evidence.Level);
     }
 }
 

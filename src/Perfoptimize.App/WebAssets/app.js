@@ -266,15 +266,62 @@ function renderResults(r) {
     html += `<p class="muted">Installe PresentMon (section Outils) pour mesurer les vrais FPS et dimensionner le plan.</p>`;
   }
 
-  // Community-documented "settings to avoid" — shown proactively, before the
-  // FPS recommendations, because they prevent crashes/stutter, not just low FPS.
+  // Community-documented "settings to avoid" — but evaluated against the game's
+  // ACTUAL current config, not shown blindly. Three states: a real problem
+  // detected now / already correctly configured / impossible to verify.
   if (r.advisories && r.advisories.length) {
     const kindLabel = { Crash: "⚠ Crash", Stutter: "⚠ Saccades", PoorValue: "Peu rentable" };
-    html += `<h3 style="font-size:14px;margin:16px 0 4px">Réglages à éviter (connus de la communauté)</h3>`;
-    for (const a of r.advisories) {
+    const evidenceLabel = {
+      CuratedCommunityClaim: "conseil communautaire (source unique)",
+      CommunityValidated: "validé par plusieurs sources",
+      Benchmarked: "mesuré en benchmark",
+    };
+    // Present the actionable ones first; keep the reassuring/unknown ones after.
+    const triggered = r.advisories.filter(a => a.status === "Triggered");
+    const alreadyOk = r.advisories.filter(a => a.status === "AlreadyOk");
+    const cannotVerify = r.advisories.filter(a => a.status === "CannotVerify");
+
+    html += `<h3 style="font-size:14px;margin:16px 0 4px">Réglages à éviter (analyse de la config actuelle)</h3>`;
+
+    const evidenceLine = (a) => {
+      let e = evidenceLabel[a.evidenceLevel] || a.evidenceLevel || "";
+      if (a.lastVerified) e += ` · vérifié le ${a.lastVerified}`;
+      if (a.sources && a.sources.length) {
+        const links = a.sources
+          .filter(s => s.url)
+          .map(s => `<a href="${s.url}" target="_blank" rel="noopener">source</a>`)
+          .join(" ");
+        if (links) e += ` · ${links}`;
+      }
+      return e ? `<div class="muted" style="font-size:11.5px;margin-top:4px">${e}</div>` : "";
+    };
+
+    for (const a of triggered) {
+      const prio = a.highPriority
+        ? `<span class="badge" style="background:var(--bad);color:#fff">Prioritaire</span>`
+        : "";
+      const cur = a.currentValue != null
+        ? ` <span class="muted" style="font-size:12px">(valeur actuelle : ${a.currentValue})</span>`
+        : "";
       html += `<div class="reco" style="border-left-color:var(--bad)">
-        <div class="t">${a.setting} <span class="badge cpu">${kindLabel[a.kind] || a.kind}</span></div>
-        <div class="r"><strong>${a.recommendation}.</strong> ${a.detail}</div></div>`;
+        <div class="t">🔴 ${a.setting} <span class="badge cpu">${kindLabel[a.kind] || a.kind}</span> ${prio}</div>
+        <div class="r"><strong>Problème détecté dans la configuration actuelle.</strong>${cur}
+          <strong> ${a.recommendation}.</strong> ${a.detail}</div>
+        ${evidenceLine(a)}</div>`;
+    }
+
+    for (const a of alreadyOk) {
+      const cur = a.currentValue != null ? ` (valeur : ${a.currentValue})` : "";
+      html += `<div class="reco" style="border-left-color:var(--good)">
+        <div class="t">🟢 ${a.setting}</div>
+        <div class="r muted">Déjà correctement configuré${cur} — aucune action nécessaire.</div></div>`;
+    }
+
+    for (const a of cannotVerify) {
+      html += `<div class="reco" style="border-left-color:var(--border)">
+        <div class="t">⚪ ${a.setting}</div>
+        <div class="r muted">Valeur impossible à vérifier (fichier de config introuvable ou clé absente).
+          À surveiller : ${a.recommendation}.</div></div>`;
     }
   }
 

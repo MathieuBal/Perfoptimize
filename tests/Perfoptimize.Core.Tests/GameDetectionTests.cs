@@ -43,6 +43,44 @@ public class GameDetectionTests
     }
 
     [Fact]
+    public void PathOfExile2_profile_is_present_and_carries_advisories()
+    {
+        var profiles = GameProfileRepository.LoadBuiltIn();
+
+        var poe2 = Assert.Single(profiles, p => p.Name == "Path of Exile 2");
+        Assert.Equal("Path of Exile 2", poe2.PathHint);
+        Assert.Contains(poe2.ConfigFiles, c => c.Path.Contains("poe2_production_Config.ini"));
+        Assert.NotEmpty(poe2.Advisories);
+        Assert.All(poe2.Advisories, a => Assert.Equal("2026-07-14", a.Evidence.LastVerified));
+    }
+
+    [Fact]
+    public void Match_uses_the_install_path_to_tell_PoE2_from_PoE1()
+    {
+        var profiles = GameProfileRepository.LoadBuiltIn();
+
+        // Same executable name — only the folder differs.
+        var poe2 = RunningGameDetector.Match(
+            "PathOfExile", @"D:\SteamLibrary\steamapps\common\Path of Exile 2\PathOfExile.exe", profiles);
+        var poe1 = RunningGameDetector.Match(
+            "PathOfExile", @"C:\Program Files\Grinding Gear Games\Path of Exile\PathOfExile.exe", profiles);
+
+        Assert.Equal("Path of Exile 2", poe2?.Name);
+        Assert.Equal("Path of Exile", poe1?.Name);
+    }
+
+    [Fact]
+    public void Match_without_a_path_falls_back_to_the_base_game()
+    {
+        var profiles = GameProfileRepository.LoadBuiltIn();
+
+        // No path evidence (protected process): default to the base game, not a variant.
+        var match = RunningGameDetector.Match("PathOfExile", executablePath: null, profiles);
+
+        Assert.Equal("Path of Exile", match?.Name);
+    }
+
+    [Fact]
     public void Parse_reads_the_documented_json_schema()
     {
         const string json = """
