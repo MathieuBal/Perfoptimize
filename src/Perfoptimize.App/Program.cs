@@ -124,10 +124,13 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
     var summary = report.Summary;
     var analysis = BottleneckDetector.Analyze(summary,
         hardware.Cpu.LogicalCores > 0 ? hardware.Cpu.LogicalCores : Environment.ProcessorCount);
+    // Read the game's CURRENT config so advisories can be evaluated in context.
+    var configValues = detected?.Profile is { } profile ? ReadCurrentConfig(profile) : null;
     var plan = RecommendationEngine.Advise(new AdviceRequest
     {
         Analysis = analysis, Game = detected?.Profile, Goal = goal,
         Hardware = hardware, Summary = summary, Frametimes = frametimes, TargetFps = targetFps,
+        ConfigValues = configValues,
     });
 
     try
@@ -164,10 +167,21 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         // number is theoretical and must be shown as such.
         gainsAreMeasured = frametimes is not null,
         notes = plan.Notes,
-        // Community-documented "settings to avoid" for this game (crashes / stutter).
-        advisories = plan.Advisories.Select(a => new
+        // Advisories evaluated against the ACTUAL config: status is triggered /
+        // alreadyOk / cannotVerify, high priority when it matches the bottleneck.
+        advisories = plan.Advisories.Select(e => new
         {
-            a.Setting, kind = a.Kind.ToString(), a.Recommendation, a.Detail, evidence = a.Evidence.ToString(),
+            setting = e.Advisory.Setting,
+            kind = e.Advisory.Kind.ToString(),
+            status = e.Status.ToString(),
+            highPriority = e.HighPriority,
+            currentValue = e.CurrentValue,
+            recommendation = e.Advisory.RecommendationText,
+            detail = e.Advisory.Detail,
+            explanation = e.Explanation,
+            evidenceLevel = e.Advisory.Evidence.Level.ToString(),
+            lastVerified = e.Advisory.Evidence.LastVerified,
+            sources = e.Advisory.Evidence.Sources.Select(s => new { s.Url, s.Note }),
         }),
     });
 });
@@ -307,6 +321,30 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 app.Run();
+
+/// <summary>Reads a known game's current config values from its config files,
+/// merging every format (INI/JSON/XML) into one key → value map.</summary>
+static IReadOnlyDictionary<string, string> ReadCurrentConfig(GameProfile game)
+{
+    var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var configFile in game.ConfigFiles)
+    {
+        try
+        {
+            var path = configFile.ResolvePath();
+            if (!File.Exists(path))
+                continue;
+            var text = File.ReadAllText(path, SafeFileWriter.DetectEncoding(path));
+            foreach (var (key, value) in ConfigValueReader.Read(text, configFile.Format.ToString()))
+                values[key] = value;
+        }
+        catch
+        {
+            // A single unreadable config must not break the analysis.
+        }
+    }
+    return values;
+}
 
 /// <summary>Body of a monitoring request from the UI.</summary>
 internal sealed record MonitorRequest(int? Seconds, string? Goal, int? TargetFps);
