@@ -52,38 +52,38 @@ public static class AdvisoryEvaluator
     {
         var currentValue = PrimaryConfigValue(advisory, context);
 
-        // Evaluate each trigger condition to true / false / unknown.
-        var anyUnknown = false;
+        // Evaluate each trigger condition to true / false / unknown, keeping WHY a
+        // condition was unknown so "already ok" is never claimed without proof.
+        var anyFalse = false;
         var allTrue = true;
+        var missingConfigKey = false;
+        var unknownSystem = false;
         foreach (var condition in advisory.Conditions)
         {
             var result = EvaluateCondition(condition, context);
             if (result is null)
             {
-                // Only a CONFIG-key condition that can't be read makes the whole
-                // advisory unverifiable; a missing system fact just fails safe.
+                allTrue = false;
                 if (condition.Key is not null)
-                    anyUnknown = true;
-                allTrue = false;
+                    missingConfigKey = true;
+                else if (condition.System is not null)
+                    unknownSystem = true;
             }
-            else if (!result.Value)
+            else if (result.Value)
             {
+                // holds
+            }
+            else
+            {
+                anyFalse = true;
                 allTrue = false;
             }
         }
 
-        if (anyUnknown && !HasReadableTriggerThatIsFalse(advisory, context))
-        {
-            return new EvaluatedAdvisory
-            {
-                Advisory = advisory,
-                Status = AdvisoryStatus.CannotVerify,
-                CurrentValue = currentValue,
-                Explanation = $"Impossible de lire la valeur de « {advisory.Setting} » dans ta configuration.",
-            };
-        }
-
-        if (!allTrue)
+        // POSITIVE PROOF the problematic combination does not hold (setting off,
+        // or the context that makes it costly is known to be absent) → already ok.
+        // A false condition outranks any unknown: we KNOW there's nothing to do.
+        if (anyFalse)
         {
             return new EvaluatedAdvisory
             {
@@ -91,8 +91,27 @@ public static class AdvisoryEvaluator
                 Status = AdvisoryStatus.AlreadyOk,
                 CurrentValue = currentValue,
                 Explanation = currentValue is not null
-                    ? $"« {advisory.Setting} » = {currentValue} : rien à corriger dans ton contexte."
-                    : $"« {advisory.Setting} » ne pose pas de problème dans ton contexte.",
+                    ? $"« {advisory.Setting} » = {currentValue} : réglage déjà correctement configuré dans ton contexte."
+                    : $"« {advisory.Setting} » est déjà correctement configuré dans ton contexte.",
+            };
+        }
+
+        // No disproof, but something could not be determined. Being unable to read
+        // a key, OR not knowing the hardware/resolution context, is NOT the same as
+        // "already fine" — say so honestly instead of being over-optimistic.
+        if (!allTrue)
+        {
+            var reason = missingConfigKey
+                ? $"clé de configuration introuvable pour « {advisory.Setting} »"
+                : unknownSystem
+                    ? "contexte matériel/résolution inconnu"
+                    : "information manquante";
+            return new EvaluatedAdvisory
+            {
+                Advisory = advisory,
+                Status = AdvisoryStatus.CannotVerify,
+                CurrentValue = currentValue,
+                Explanation = $"Impossible de vérifier « {advisory.Setting} » ({reason}).",
             };
         }
 
@@ -124,15 +143,16 @@ public static class AdvisoryEvaluator
     /// <summary>The value the flagged setting currently has, from its first config condition.</summary>
     private static string? PrimaryConfigValue(SettingAdvisory advisory, AdvisoryContext context)
     {
-        var key = advisory.Conditions.FirstOrDefault(c => c.Key is not null)?.Key;
-        return key is not null && context.ConfigValues.TryGetValue(key, out var v) ? v : null;
+        var condition = advisory.Conditions.FirstOrDefault(c => c.Key is not null);
+        return condition is not null &&
+               context.ConfigValues.TryGetValue(LookupKey(condition), out var v)
+            ? v
+            : null;
     }
 
-    /// <summary>A readable config trigger that evaluates false means "already ok", not "unknown".</summary>
-    private static bool HasReadableTriggerThatIsFalse(SettingAdvisory advisory, AdvisoryContext context) =>
-        advisory.Conditions.Any(c =>
-            c.Key is not null && context.ConfigValues.ContainsKey(c.Key) &&
-            EvaluateCondition(c, context) == false);
+    /// <summary>The dictionary key a condition reads: "Section.Key" when qualified, else "Key".</summary>
+    private static string LookupKey(AdvisoryCondition condition) =>
+        string.IsNullOrEmpty(condition.Section) ? condition.Key! : $"{condition.Section}.{condition.Key}";
 
     /// <summary>Evaluates a condition to true/false, or null when its input is unavailable.</summary>
     private static bool? EvaluateCondition(AdvisoryCondition condition, AdvisoryContext context)
@@ -140,7 +160,7 @@ public static class AdvisoryEvaluator
         string? actual = null;
         if (condition.Key is not null)
         {
-            if (!context.ConfigValues.TryGetValue(condition.Key, out var v))
+            if (!context.ConfigValues.TryGetValue(LookupKey(condition), out var v))
                 return null;
             actual = v;
         }

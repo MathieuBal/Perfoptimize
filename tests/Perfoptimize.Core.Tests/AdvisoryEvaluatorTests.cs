@@ -90,6 +90,47 @@ public class AdvisoryEvaluatorTests
     }
 
     [Fact]
+    public void An_active_setting_with_unknown_resolution_is_not_claimed_already_ok()
+    {
+        // MSAA is ON, but we don't know the game's resolution: we must NOT be
+        // optimistic and say "already ok" — it is genuinely unverifiable.
+        var e = AdvisoryEvaluator.Evaluate(Msaa(), Ctx(new() { ["MSAA"] = "4" }, width: null));
+
+        Assert.Equal(AdvisoryStatus.CannotVerify, e.Status);
+    }
+
+    [Fact]
+    public void Already_ok_requires_positive_proof_a_setting_is_off()
+    {
+        // Setting positively OFF is proof, even with resolution unknown.
+        var e = AdvisoryEvaluator.Evaluate(Msaa(), Ctx(new() { ["MSAA"] = "0" }, width: null));
+
+        Assert.Equal(AdvisoryStatus.AlreadyOk, e.Status);
+    }
+
+    [Fact]
+    public void A_section_qualified_condition_reads_the_right_key()
+    {
+        var advisory = new SettingAdvisory
+        {
+            Id = "q", Setting = "Shadow Quality", Kind = AdvisoryKind.PoorValue,
+            Conditions = [new AdvisoryCondition
+            {
+                Section = "Shadows", Key = "quality",
+                Operator = ConditionOperator.GreaterThanOrEqual, Value = "3",
+            }],
+        };
+        // Two sections carry "quality"; only the qualified one is exposed.
+        var config = ConfigValueReader.Read("[Shadows]\nquality=3\n[Textures]\nquality=1", "ini");
+
+        var e = AdvisoryEvaluator.Evaluate(advisory,
+            new AdvisoryContext { ConfigValues = config });
+
+        Assert.Equal(AdvisoryStatus.Triggered, e.Status);
+        Assert.Equal("3", e.CurrentValue);
+    }
+
+    [Fact]
     public void EvaluateAll_orders_triggered_and_priority_first()
     {
         var config = new Dictionary<string, string> { ["MSAA"] = "4", ["CrowdDensity"] = "0" };
@@ -142,5 +183,26 @@ public class ConfigValueReaderTests
     {
         Assert.Empty(ConfigValueReader.Read("{ not json", "json"));
         Assert.Empty(ConfigValueReader.Read("<broken", "xml"));
+    }
+
+    [Fact]
+    public void An_ambiguous_bare_key_is_dropped_but_qualified_keys_remain()
+    {
+        // "quality" means different things in two sections: the bare alias is unsafe.
+        var values = ConfigValueReader.Read(
+            "[Shadows]\nquality=1\n[Textures]\nquality=3", "ini");
+
+        Assert.False(values.ContainsKey("quality"));   // ambiguous → not exposed bare
+        Assert.Equal("1", values["Shadows.quality"]);  // qualified forms always safe
+        Assert.Equal("3", values["Textures.quality"]);
+    }
+
+    [Fact]
+    public void A_bare_key_with_one_consistent_value_survives()
+    {
+        var values = ConfigValueReader.Read(
+            "[A]\nvsync=1\n[B]\nvsync=1", "ini");
+
+        Assert.Equal("1", values["vsync"]);
     }
 }

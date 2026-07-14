@@ -1,0 +1,69 @@
+{
+  "name": "Path of Exile 2",
+  "executables": ["PathOfExile.exe", "PathOfExileSteam.exe", "PathOfExile_x64.exe", "PathOfExile_x64Steam.exe"],
+  "pathHint": "Path of Exile 2",
+  "upscalers": ["dlss", "fsr", "xess"],
+  "configFiles": [
+    { "path": "%DOCUMENTS%\\My Games\\Path of Exile 2\\poe2_production_Config.ini", "format": "ini" }
+  ],
+  "advisories": [
+    {
+      "id": "poe2-upscaling-disabled",
+      "setting": "Mise à l'échelle (DLSS / FSR / XeSS)",
+      "kind": "poorValue",
+      "conditions": [
+        { "key": "upscale", "operator": "equals", "value": "None" }
+      ],
+      "priorityWhen": [
+        { "system": "bottleneck", "operator": "equals", "value": "Gpu" }
+      ],
+      "recommendation": { "action": "lower", "targetValue": "DLSS" },
+      "recommendationText": "Activer un upscaler (DLSS sur RTX, sinon FSR/XeSS) en mode Qualité",
+      "detail": "Path of Exile 2 devient lourd côté GPU dès qu'il y a beaucoup d'effets à l'écran ; jouer sans mise à l'échelle laisse un gain important inexploité pour une perte visuelle minime en mode Qualité.",
+      "evidence": {
+        "level": "curatedCommunityClaim",
+        "sources": [
+          { "url": "https://poe2settings.com/guides/poe2-0-5-0-performance-guide", "note": "Guide de réglages communautaire PoE2 0.5.0" },
+          { "url": "https://iqondigital.com/learn/games/optimize-path-of-exile-2-performance", "note": "Guide d'optimisation PoE2" }
+        ],
+        "lastVerified": "2026-07-14",
+        "gameVersions": ["0.5.x"]
+      },
+      "automaticApplication": false
+    },
+    {
+      "id": "poe2-dynamic-res-plus-upscaler",
+      "setting": "Résolution dynamique + upscaler simultanés",
+      "kind": "poorValue",
+      "conditions": [
+        { "key": "use_dynamic_resolution", "operator": "isOn", "value": "1" },
+        { "key": "upscale", "operator": "notEquals", "value": "None" }
+      ],
+      "recommendation": { "action": "disable", "targetValue": "false" },
+      "recommendationText": "Désactiver la résolution dynamique quand un upscaler est déjà actif",
+      "detail": "Empiler la résolution dynamique par-dessus DLSS/FSR fait descendre puis remonter deux fois la résolution de rendu : l'image devient inutilement floue et le rythme des images moins stable. Choisir l'un des deux, pas les deux.",
+      "evidence": {
+        "level": "curatedCommunityClaim",
+        "sources": [
+          { "url": "https://poe2settings.com/guides/poe2-0-5-0-performance-guide", "note": "La résolution dynamique introduit un flou incohérent ; déconseillée avec un upscaler" }
+        ],
+        "lastVerified": "2026-07-14",
+        "gameVersions": ["0.5.x"]
+      },
+      "automaticApplication": false
+    }
+  ],
+  "settings": [
+    { "name": "Shadow Quality", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },
+    { "name": "Global Illumination Quality", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 14 },
+    { "name": "Bloom", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 4 },
+    { "name": "Screen Space Reflections", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Water Detail", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 5 },
+    {
+      "name": "Texture Quality", "impact": "vram", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2,
+      "vramGiBByLevel": { "Low": 3, "Medium": 4, "High": 6 }
+    },
+    { "name": "Engine Multithreading", "impact": "cpu", "action": "keepEnabled", "evidence": "communityValidated", "qualityLoss": 0, "performanceGain": 0, "estimatedGainPercent": 0 },
+    { "name": "Renderer (DirectX 11 / 12 / Vulkan)", "impact": "mixed", "action": "testAlternatives", "evidence": "estimated", "qualityLoss": 0, "performanceGain": 0, "estimatedGainPercent": 0 }
+  ]
+}

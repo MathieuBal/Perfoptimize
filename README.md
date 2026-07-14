@@ -33,6 +33,9 @@ de réglages graphiques.
 - ✅ **Étape 18 — avisories contextuelles** (chaque conseil « à éviter » est évalué contre la
   *valeur réellement présente* dans la config, le matériel et le goulot mesuré ; trois états :
   problème détecté / déjà correctement configuré / impossible à vérifier)
+- ✅ **Étape 19 — profil complet de Path of Exile 2 + fiabilisation du moteur** (résolution du
+  *jeu* plutôt que de l'écran, clés de config non ambiguës via section, « déjà correct » exigeant
+  une preuve positive, distinction PoE 1 / PoE 2 par le dossier d'installation)
 
 ## Réglages à éviter — désormais **contextuels**
 
@@ -74,6 +77,48 @@ de dernière vérification et versions du jeu concernées. Exemples couverts :
 L'évaluation vit dans `AdvisoryEvaluator` (moteur), la lecture des valeurs dans
 `ConfigValueReader` (INI/JSON/XML → dictionnaire clé→valeur, insensible à la
 casse, ne lève jamais).
+
+### Trois garde-fous de fiabilité
+
+1. **Résolution du jeu, pas de l'écran.** Un écran 1440p peut faire tourner le
+   jeu en 1080p, en fenêtré ou en résolution dynamique. Le moteur lit d'abord la
+   résolution déclarée dans la config (`resolution_width`/`resolution_height`…)
+   et ne retombe sur celle de l'écran qu'à défaut — sinon une alerte MSAA
+   « 1440p » se déclencherait alors que le rendu est en réalité plus bas.
+2. **Clés non ambiguës.** Le lecteur expose toujours une clé **qualifiée**
+   (`Section.clé`, chemin JSON, `élément.attribut`) et ne conserve la clé courte
+   que si elle est **non ambiguë** : si deux sections définissent `quality` avec
+   des valeurs différentes, la clé courte est retirée et l'advisory doit viser
+   `Section.clé`. Une advisory sérieuse cible donc *section + clé*, jamais un nom
+   court qui pourrait pointer sur le mauvais réglage.
+3. **« Déjà correct » exige une preuve positive.** Une condition indéterminable
+   (résolution ou matériel inconnu, clé absente) ne produit **jamais** « déjà
+   correctement configuré » : elle produit « impossible à vérifier ». L'état vert
+   n'est affiché que lorsqu'une condition est *positivement fausse* (réglage
+   réellement désactivé ou hors de son contexte coûteux).
+
+## Path of Exile 2 : profil complet et contextualisé
+
+Path of Exile 2 partage **les mêmes noms d'exécutables** que Path of Exile 1
+(`PathOfExile.exe`, `PathOfExile_x64.exe`…) — GGG ne les a pas renommés. Les
+distinguer par le seul nom de processus est donc impossible : le détecteur les
+sépare par le **dossier d'installation** (champ `pathHint` du profil ; le chemin
+le plus spécifique l'emporte, « Path of Exile 2 » avant « Path of Exile »). Sans
+chemin lisible (processus protégé), le repli va au jeu de base.
+
+Le profil `pathofexile2.json` fournit :
+
+- les exécutables réels + le `pathHint` de désambiguïsation ;
+- le chemin exact de config `%DOCUMENTS%\My Games\Path of Exile 2\poe2_production_Config.ini` ;
+- les upscalers réellement disponibles (DLSS / FSR / XeSS) ;
+- les réglages graphiques (ombres, illumination globale, réflexions, eau, textures,
+  multithreading moteur à laisser activé, choix du renderer à tester) ;
+- des **advisories datées et sourcées**, dont une qui illustre une *dépendance
+  entre réglages* : résolution dynamique **et** upscaler actifs simultanément
+  (double mise à l'échelle → flou inutile), à ne pas cumuler.
+
+Conformément au protocole de test, **aucune modification automatique** n'est
+appliquée : `automaticApplication` est à `false` sur toutes les advisories PoE 2.
 
 ## Scan multi-disques
 

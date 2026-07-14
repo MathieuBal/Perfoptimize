@@ -168,16 +168,49 @@ public static class RecommendationEngine
         var primaryDisplay = request.Hardware?.Displays.FirstOrDefault(d => d.IsPrimary)
                              ?? request.Hardware?.Displays.FirstOrDefault();
         var vramBytes = request.Hardware?.PrimaryGpu?.VramBytes;
+
+        // The GAME's rendering resolution, not the monitor's, is what makes a
+        // setting like MSAA costly: a 1440p screen can run the game at 1080p, in a
+        // window, or with dynamic resolution. Prefer the resolution declared in the
+        // config; fall back to the display only when the config doesn't state one.
+        var (configWidth, configHeight) = ResolutionFromConfig(request.ConfigValues);
         var context = new AdvisoryContext
         {
             ConfigValues = request.ConfigValues ?? new Dictionary<string, string>(),
-            ResolutionWidth = primaryDisplay?.WidthPixels,
-            ResolutionHeight = primaryDisplay?.HeightPixels,
+            ResolutionWidth = configWidth ?? primaryDisplay?.WidthPixels,
+            ResolutionHeight = configHeight ?? primaryDisplay?.HeightPixels,
             VramGiB = vramBytes is > 0 ? vramBytes.Value / 1024.0 / 1024.0 / 1024.0 : null,
             Bottleneck = request.Analysis.Type,
             TargetMet = measuredFps is { } fps ? fps >= targetFps : null,
         };
         return AdvisoryEvaluator.EvaluateAll(game.Advisories, context);
+    }
+
+    /// <summary>
+    /// Reads the game's own rendering resolution from its config, trying the key
+    /// names games actually use. Returns (null, null) when none is present, so the
+    /// caller can fall back to the display resolution.
+    /// </summary>
+    private static (int? Width, int? Height) ResolutionFromConfig(
+        IReadOnlyDictionary<string, string>? config)
+    {
+        if (config is null)
+            return (null, null);
+
+        string[] widthKeys = ["resolution_width", "ResolutionWidth", "width", "ScreenWidth", "DisplayWidth", "iScreenWidth"];
+        string[] heightKeys = ["resolution_height", "ResolutionHeight", "height", "ScreenHeight", "DisplayHeight", "iScreenHeight"];
+        return (FirstInt(config, widthKeys), FirstInt(config, heightKeys));
+    }
+
+    private static int? FirstInt(IReadOnlyDictionary<string, string> config, string[] keys)
+    {
+        foreach (var key in keys)
+            if (config.TryGetValue(key, out var raw) &&
+                int.TryParse(raw, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var value) &&
+                value > 0)
+                return value;
+        return null;
     }
 
     private static AdvicePlan BuildPlan(

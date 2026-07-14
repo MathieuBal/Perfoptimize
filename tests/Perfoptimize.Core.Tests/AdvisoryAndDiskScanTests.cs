@@ -72,6 +72,47 @@ public class AdvisoryTests
     }
 
     [Fact]
+    public void The_games_config_resolution_is_preferred_over_the_screen()
+    {
+        // Screen is 1080p but the game renders at 1440p (config says so): an MSAA
+        // advisory gated on resolutionWidth>=2560 must fire on the GAME resolution.
+        var game = new GameProfile
+        {
+            Name = "Res Test", Executables = ["res.exe"], Upscalers = [],
+            Advisories =
+            [
+                new SettingAdvisory
+                {
+                    Id = "msaa", Setting = "MSAA", Kind = AdvisoryKind.PoorValue,
+                    Conditions =
+                    [
+                        new AdvisoryCondition { Key = "MSAA", Operator = ConditionOperator.GreaterThan, Value = "0" },
+                        new AdvisoryCondition { System = "resolutionWidth", Operator = ConditionOperator.GreaterThanOrEqual, Value = "2560" },
+                    ],
+                },
+            ],
+            Settings = [new GameSetting { Name = "Shadows", Impact = SettingImpact.Gpu, QualityLoss = 2, PerformanceGain = 4 }],
+        };
+        var hardware = new Perfoptimize.Core.Hardware.HardwareProfile
+        {
+            Displays = [new Perfoptimize.Core.Hardware.DisplayInfo { WidthPixels = 1920, HeightPixels = 1080, IsPrimary = true }],
+        };
+
+        var plan = RecommendationEngine.Advise(new AdviceRequest
+        {
+            Analysis = new BottleneckAnalysis { Type = BottleneckType.Gpu },
+            Game = game,
+            Hardware = hardware,
+            ConfigValues = new Dictionary<string, string>
+            {
+                ["MSAA"] = "4", ["resolution_width"] = "2560", ["resolution_height"] = "1440",
+            },
+        });
+
+        Assert.Equal(AdvisoryStatus.Triggered, Assert.Single(plan.Advisories).Status);
+    }
+
+    [Fact]
     public void Built_in_profiles_carry_structured_advisories()
     {
         var profiles = GameProfileRepository.LoadBuiltIn();

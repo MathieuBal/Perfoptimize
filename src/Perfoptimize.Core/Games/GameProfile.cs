@@ -12,6 +12,15 @@ public sealed class GameProfile
     public string Name { get; init; } = "Unknown";
     /// <summary>Process executable names, with or without ".exe", case-insensitive.</summary>
     public IReadOnlyList<string> Executables { get; init; } = [];
+    /// <summary>
+    /// Distinctive substring of the running executable's full path, used to tell
+    /// apart games that SHARE executable names (Path of Exile 2 ships the same
+    /// "PathOfExile.exe" as Path of Exile 1 — only the install folder differs).
+    /// When several profiles match the same process name, the one whose longest
+    /// <see cref="PathHint"/> is contained in the process path wins. Null when the
+    /// executable name alone is unambiguous.
+    /// </summary>
+    public string? PathHint { get; init; }
     public IReadOnlyList<GameSetting> Settings { get; init; } = [];
     /// <summary>Configuration files the assistant may read (and back up).</summary>
     public IReadOnlyList<GameConfigFile> ConfigFiles { get; init; } = [];
@@ -77,6 +86,12 @@ public sealed class AdvisoryCondition
 {
     /// <summary>Config key this condition reads (matched within the game's config); null for a system condition.</summary>
     public string? Key { get; init; }
+    /// <summary>
+    /// Optional INI section / JSON-or-XML parent qualifying <see cref="Key"/>, so
+    /// the advisory targets a specific "section.key" and never collides with a
+    /// same-named key in another section. When set, the lookup is "Section.Key".
+    /// </summary>
+    public string? Section { get; init; }
     /// <summary>System property: resolutionWidth | resolutionHeight | vramGiB | bottleneck | targetMet.</summary>
     public string? System { get; init; }
     public ConditionOperator Operator { get; init; }
