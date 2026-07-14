@@ -5,6 +5,22 @@
   "configFiles": [
     { "path": "%LOCALAPPDATA%\\CD Projekt Red\\Cyberpunk 2077\\UserSettings.json", "format": "json" }
   ],
+  "advisories": [
+    {
+      "setting": "Screen Space Reflections : Psycho",
+      "kind": "poorValue",
+      "recommendation": "Rester sur Élevé plutôt que Psycho/Fou",
+      "detail": "Le mode Psycho des réflexions coûte énormément de FPS pour une différence à peine visible. Élevé offre presque le même rendu sans le coût.",
+      "evidence": "communityValidated"
+    },
+    {
+      "setting": "Densité de foule : Élevée",
+      "kind": "stutter",
+      "recommendation": "Moyenne si le CPU sature en ville",
+      "detail": "En ville, une foule élevée charge fortement le CPU et provoque des à-coups sur les processeurs à cœurs limités. Moyenne lisse l'expérience.",
+      "evidence": "communityValidated"
+    }
+  ],
   "settings": [
     { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 3, "performanceGain": 5, "estimatedGainPercent": 30 },
     { "name": "Screen Space Reflections", "impact": "gpu", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },

@@ -28,6 +28,31 @@ de réglages graphiques.
   preuve* ; fin de la logique « tout baisser », gains affichés comme théoriques tant que non mesurés)
 - ✅ **Étape 16 — découverte des jeux installés + lecture des configs** (parcours des bibliothèques
   Steam, localisation et lecture générique des fichiers de configuration, sans profil requis)
+- ✅ **Étape 17 — scan multi-disques, Epic, et réglages à éviter** (toutes les bibliothèques Steam
+  de tous les disques + Epic Games ; base de connaissances communautaire des réglages problématiques)
+
+## Réglages à éviter (connaissance communautaire)
+
+Certains réglages sont mal optimisés : la communauté sait qu'il vaut mieux ne
+pas les activer (crashs, saccades, coût disproportionné). Perfoptimize porte
+désormais cette connaissance dans les profils, sous forme d'**avisories**
+affichées **spontanément** à chaque analyse, quel que soit le goulot :
+
+- Witcher 3 : *HairWorks* (peu rentable), *ray tracing next-gen* (saccades de traversée) ;
+- Cyberpunk 2077 : *réflexions Psycho* (peu rentable), *densité de foule élevée* (à-coups CPU) ;
+- Elden Ring : *ray tracing* (saccades, jeu déjà plafonné à 60) ;
+- GTA V : *MSAA* en 1440p/4K (peu rentable), *distance d'affichage étendue* (à-coups).
+
+Chaque avisory porte un **type** (crash / saccades / peu rentable), une action
+recommandée, une explication et un niveau de preuve (`communityValidated`).
+
+## Scan multi-disques
+
+Le scan des jeux installés couvre maintenant **tous les disques fixes** : il
+sonde chaque lecteur pour les bibliothèques Steam (`SteamLibrary`, `Steam`,
+`Games\SteamLibrary`…), en plus de la racine Steam du registre, et ajoute les
+jeux **Epic Games** (manifestes `.item`). Un jeu installé sur D:/K:/… est donc
+détecté même s'il n'est pas dans la bibliothèque Steam par défaut.
 
 ## Découverte des jeux installés et de leurs configs
 

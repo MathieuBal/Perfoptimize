@@ -3,6 +3,15 @@
   "executables": ["eldenring.exe"],
   "upscalers": [],
   "frameCapFps": 60,
+  "advisories": [
+    {
+      "setting": "Ray Tracing",
+      "kind": "stutter",
+      "recommendation": "Laisser désactivé sauf besoin explicite",
+      "detail": "Le ray tracing ajouté par un patch coûte cher et provoque des saccades sur beaucoup de configurations, dans un jeu déjà plafonné à 60 FPS. À laisser désactivé pour une expérience stable.",
+      "evidence": "communityValidated"
+    }
+  ],
   "settings": [
     { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5, "estimatedGainPercent": 25 },
     { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },

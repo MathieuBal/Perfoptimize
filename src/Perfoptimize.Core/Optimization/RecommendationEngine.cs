@@ -59,6 +59,8 @@ public sealed class AdvicePlan
     public IReadOnlyList<Recommendation> Recommendations { get; init; } = [];
     /// <summary>Context the player should know (frame caps, out-of-reach targets, ...).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
+    /// <summary>Community-documented settings to avoid for this game — shown proactively.</summary>
+    public IReadOnlyList<SettingAdvisory> Advisories { get; init; } = [];
 }
 
 /// <summary>
@@ -110,11 +112,15 @@ public static class RecommendationEngine
             ? Math.Max(0, Math.Round((targetFps / measuredFps.Value - 1) * 100, 1))
             : null;
 
+        // Community-documented "settings to avoid" are shown regardless of the
+        // bottleneck — they prevent crashes and stutter, not just low FPS.
+        var advisories = request.Game?.Advisories ?? [];
+
         // 2. Target already met on average: the problem, if any, is smoothness.
         if (requiredGain is 0)
         {
             recommendations.AddRange(StutterAdvice(request, targetFps, notes));
-            return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes);
+            return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes, advisories);
         }
 
         // 3. Setting suggestions from the game profile, sized to the gap when known.
@@ -139,12 +145,13 @@ public static class RecommendationEngine
                       "the resolution, or upgrading the limiting component.");
         }
 
-        return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes);
+        return BuildPlan(targetFps, measuredFps, requiredGain, recommendations, notes, advisories);
     }
 
     private static AdvicePlan BuildPlan(
         int targetFps, double? measuredFps, double? requiredGain,
-        List<Recommendation> recommendations, List<string> notes)
+        List<Recommendation> recommendations, List<string> notes,
+        IReadOnlyList<SettingAdvisory> advisories)
     {
         // Individual estimates interact (relieving the GPU changes what the next
         // setting can gain), so a sum is an optimistic ceiling. Report a range
@@ -172,6 +179,7 @@ public static class RecommendationEngine
             EstimatedGainHighPercent = high,
             Recommendations = recommendations,
             Notes = notes,
+            Advisories = advisories,
         };
     }
 

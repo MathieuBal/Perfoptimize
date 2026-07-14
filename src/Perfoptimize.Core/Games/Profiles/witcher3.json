@@ -5,6 +5,22 @@
   "configFiles": [
     { "path": "%DOCUMENTS%\\The Witcher 3\\user.settings", "format": "ini" }
   ],
+  "advisories": [
+    {
+      "setting": "NVIDIA HairWorks",
+      "kind": "poorValue",
+      "recommendation": "Désactiver, ou limiter à Geralt uniquement",
+      "detail": "HairWorks coûte très cher en performances pour un gain visuel faible, surtout sur cartes AMD. La communauté recommande de le désactiver ou de le limiter à Geralt.",
+      "evidence": "communityValidated"
+    },
+    {
+      "setting": "Ray Tracing (mise à jour next-gen)",
+      "kind": "stutter",
+      "recommendation": "Désactiver si tu as des saccades",
+      "detail": "Le ray tracing de la mise à jour next-gen provoque des saccades de traversée (traversal stutter) sur de nombreuses configurations. À désactiver en priorité si le jeu saccade.",
+      "evidence": "communityValidated"
+    }
+  ],
   "settings": [
     { "name": "Ray Tracing", "impact": "gpu", "qualityLoss": 2, "performanceGain": 5, "estimatedGainPercent": 30 },
     {

@@ -266,6 +266,18 @@ function renderResults(r) {
     html += `<p class="muted">Installe PresentMon (section Outils) pour mesurer les vrais FPS et dimensionner le plan.</p>`;
   }
 
+  // Community-documented "settings to avoid" — shown proactively, before the
+  // FPS recommendations, because they prevent crashes/stutter, not just low FPS.
+  if (r.advisories && r.advisories.length) {
+    const kindLabel = { Crash: "⚠ Crash", Stutter: "⚠ Saccades", PoorValue: "Peu rentable" };
+    html += `<h3 style="font-size:14px;margin:16px 0 4px">Réglages à éviter (connus de la communauté)</h3>`;
+    for (const a of r.advisories) {
+      html += `<div class="reco" style="border-left-color:var(--bad)">
+        <div class="t">${a.setting} <span class="badge cpu">${kindLabel[a.kind] || a.kind}</span></div>
+        <div class="r"><strong>${a.recommendation}.</strong> ${a.detail}</div></div>`;
+    }
+  }
+
   if (r.recommendations.length) {
     html += `<h3 style="font-size:14px;margin:16px 0 4px">Recommandations</h3>`;
     if (!r.gainsAreMeasured) {

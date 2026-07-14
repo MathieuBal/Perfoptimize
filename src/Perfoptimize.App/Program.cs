@@ -164,6 +164,11 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         // number is theoretical and must be shown as such.
         gainsAreMeasured = frametimes is not null,
         notes = plan.Notes,
+        // Community-documented "settings to avoid" for this game (crashes / stutter).
+        advisories = plan.Advisories.Select(a => new
+        {
+            a.Setting, kind = a.Kind.ToString(), a.Recommendation, a.Detail, evidence = a.Evidence.ToString(),
+        }),
     });
 });
 

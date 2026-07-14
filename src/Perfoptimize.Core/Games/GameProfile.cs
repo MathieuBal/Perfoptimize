@@ -23,6 +23,38 @@ public sealed class GameProfile
     public IReadOnlyList<string>? Upscalers { get; init; }
     /// <summary>Hard engine frame cap (e.g. 60 for Elden Ring); null when uncapped.</summary>
     public int? FrameCapFps { get; init; }
+    /// <summary>
+    /// Known, community-documented settings to avoid — those that crash, stutter
+    /// or cost a lot for little visual value. Surfaced proactively, regardless of
+    /// the measured bottleneck.
+    /// </summary>
+    public IReadOnlyList<SettingAdvisory> Advisories { get; init; } = [];
+}
+
+/// <summary>Why a setting is flagged as best avoided.</summary>
+public enum AdvisoryKind
+{
+    /// <summary>Known to crash or cause instability on some setups.</summary>
+    Crash,
+    /// <summary>Known to cause stutter / traversal hitches.</summary>
+    Stutter,
+    /// <summary>Very expensive for a barely visible difference.</summary>
+    PoorValue,
+}
+
+/// <summary>
+/// A curated warning about a specific setting, from the game's community —
+/// "don't enable X, it crashes / stutters / isn't worth it".
+/// </summary>
+public sealed class SettingAdvisory
+{
+    public string Setting { get; init; } = "";
+    public AdvisoryKind Kind { get; init; }
+    /// <summary>Short recommended action, e.g. "Disable" or "Keep at Medium or below".</summary>
+    public string Recommendation { get; init; } = "";
+    /// <summary>Why — the community-documented reason.</summary>
+    public string Detail { get; init; } = "";
+    public EvidenceLevel Evidence { get; init; } = EvidenceLevel.CommunityValidated;
 }
 
 /// <summary>Which resource a graphics setting mostly consumes.</summary>
