@@ -21,6 +21,9 @@ public sealed class LiveMonitor
 
         var (ramTotal, ramUsed) = SystemMemoryReader.Read();
         var telemetry = TrySampleTelemetry(gamePid);
+        double? dpc = null, interrupt = null;
+        if (OperatingSystem.IsWindows())
+            (dpc, interrupt) = DpcLatencyReader.Read();
 
         return LiveUsageCalculator.Compute(
             before, after, window, Environment.ProcessorCount,
@@ -29,7 +32,9 @@ public sealed class LiveMonitor
             vramPercent: telemetry?.VramUsagePercent,
             cpuTemperatureC: telemetry?.CpuTemperatureC,
             gpuTemperatureC: telemetry?.GpuTemperatureC,
-            gpuThrottling: telemetry?.GpuThermalThrottleActive);
+            gpuThrottling: telemetry?.GpuThermalThrottleActive,
+            dpcPercent: dpc,
+            interruptPercent: interrupt);
     }
 
     /// <summary>

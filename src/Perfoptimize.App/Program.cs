@@ -21,6 +21,9 @@ builder.Logging.ClearProviders(); // a desktop tool should not spam the console
 // Ephemeral loopback port: no conflict with anything the user already runs.
 builder.WebHost.UseUrls("http://127.0.0.1:0");
 builder.Services.AddHttpClient();
+// Continuous background monitoring: sample the machine server-side, always.
+builder.Services.AddSingleton<LiveState>();
+builder.Services.AddHostedService<LiveMonitorHostedService>();
 
 var app = builder.Build();
 
@@ -180,15 +183,18 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
 });
 
 // ----- Live: continuous whole-PC monitoring ----------------------------------
-app.MapGet("/api/live", async () =>
+app.MapGet("/api/live", async (LiveState state) =>
 {
-    // One instant of the whole machine: system CPU/RAM, the busiest processes,
-    // and what is competing with the running game right now. The UI polls this.
-    var profiles = GameProfileRepository.LoadBuiltIn();
-    var detected = new RunningGameDetector().DetectAny(profiles);
-
-    var snapshot = await new LiveMonitor().SampleAsync(
-        TimeSpan.FromMilliseconds(350), detected?.ProcessId, detected?.Name);
+    // Served from the background sampler's latest snapshot (instant); only if it
+    // has not produced one yet do we sample inline as a fallback.
+    var (snapshot, alerts) = state.Read();
+    if (snapshot is null)
+    {
+        var profiles = GameProfileRepository.LoadBuiltIn();
+        var detected = new RunningGameDetector().DetectAny(profiles);
+        snapshot = await new LiveMonitor().SampleAsync(
+            TimeSpan.FromMilliseconds(350), detected?.ProcessId, detected?.Name);
+    }
 
     return Results.Json(new
     {
@@ -202,12 +208,14 @@ app.MapGet("/api/live", async () =>
         snapshot.CpuTemperatureC,
         snapshot.GpuTemperatureC,
         snapshot.GpuThrottling,
+        snapshot.DpcPercent,
+        snapshot.InterruptPercent,
         snapshot.ProcessCount,
         game = snapshot.GameName,
         snapshot.GamePid,
         topByCpu = snapshot.TopByCpu.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
         topByMemory = snapshot.TopByMemory.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
-        alerts = snapshot.Alerts.Select(a => new { kind = a.Kind.ToString(), a.Level, a.Title, a.Detail }),
+        alerts = alerts.Select(a => new { a.Id, a.Kind, a.Level, a.Title, a.Detail, firstSeen = a.FirstSeen.ToString("o") }),
     });
 });
 

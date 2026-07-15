@@ -14,6 +14,9 @@ public static class LiveUsageCalculator
     private const double HighRamPercent = 90;
     private const double HotGpuC = 87;
     private const double HotCpuC = 95;
+    // % of CPU time in DPC or interrupts above which driver latency is likely
+    // to be felt as micro-stutter (LatencyMon territory, at a coarse level).
+    private const double HighDpcPercent = 8;
 
     public static LiveSnapshot Compute(
         IReadOnlyList<ProcessTimes> before,
@@ -29,6 +32,8 @@ public static class LiveUsageCalculator
         double? cpuTemperatureC = null,
         double? gpuTemperatureC = null,
         bool? gpuThrottling = null,
+        double? dpcPercent = null,
+        double? interruptPercent = null,
         int topN = 6)
     {
         var previousCpu = new Dictionary<int, TimeSpan>(before.Count);
@@ -92,19 +97,22 @@ public static class LiveUsageCalculator
             CpuTemperatureC = cpuTemperatureC,
             GpuTemperatureC = gpuTemperatureC,
             GpuThrottling = gpuThrottling,
+            DpcPercent = dpcPercent,
+            InterruptPercent = interruptPercent,
             ProcessCount = after.Count,
             GamePid = gamePid,
             GameName = gameName,
             TopByCpu = topByCpu,
             TopByMemory = topByMemory,
             Alerts = BuildAlerts(usages, systemCpu, ramPercent, gameName,
-                cpuTemperatureC, gpuTemperatureC, gpuThrottling),
+                cpuTemperatureC, gpuTemperatureC, gpuThrottling, dpcPercent, interruptPercent),
         };
     }
 
     private static IReadOnlyList<LiveAlert> BuildAlerts(
         IReadOnlyList<ProcessUsage> usages, double systemCpu, double? ramPercent, string? gameName,
-        double? cpuTemperatureC, double? gpuTemperatureC, bool? gpuThrottling)
+        double? cpuTemperatureC, double? gpuTemperatureC, bool? gpuThrottling,
+        double? dpcPercent, double? interruptPercent)
     {
         var alerts = new List<LiveAlert>();
 
@@ -175,6 +183,23 @@ public static class LiveUsageCalculator
                 Detail = "Le processeur approche de sa limite et va réduire ses fréquences (throttling), " +
                          "voire déclencher un arrêt de protection. Vérifie le ventirad et la pâte thermique, " +
                          "et nettoie les entrées d'air.",
+            });
+        }
+
+        // Driver latency: high DPC/ISR time is the classic cause of micro-freezes
+        // with no CPU/GPU saturation — the signal LatencyMon is built around.
+        var latency = Math.Max(dpcPercent ?? 0, interruptPercent ?? 0);
+        if (latency >= HighDpcPercent)
+        {
+            alerts.Add(new LiveAlert
+            {
+                Kind = LiveAlertKind.DriverLatency,
+                Level = "warn",
+                Title = $"Latence pilote élevée (DPC/ISR {latency:0} %)",
+                Detail = "Beaucoup de temps passé dans les routines de pilotes — souvent la cause des " +
+                         "micro-freezes sans que le CPU ou le GPU ne saturent. Mets à jour les pilotes " +
+                         "chipset, GPU, réseau (Killer/Realtek) et audio ; l'outil LatencyMon (catalogue) " +
+                         "identifie précisément le pilote fautif.",
             });
         }
 
