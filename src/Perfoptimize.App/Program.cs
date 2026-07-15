@@ -7,6 +7,7 @@ using Perfoptimize.Core.Diagnostics;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Hardware;
 using Perfoptimize.Core.Library;
+using Perfoptimize.Core.Live;
 using Perfoptimize.Core.Monitoring;
 using Perfoptimize.Core.Monitoring.Frametimes;
 using Perfoptimize.Core.Monitoring.Windows;
@@ -174,6 +175,33 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         {
             a.Setting, kind = a.Kind.ToString(), a.Recommendation, a.Detail, evidence = a.Evidence.ToString(),
         }),
+    });
+});
+
+// ----- Live: continuous whole-PC monitoring ----------------------------------
+app.MapGet("/api/live", async () =>
+{
+    // One instant of the whole machine: system CPU/RAM, the busiest processes,
+    // and what is competing with the running game right now. The UI polls this.
+    var profiles = GameProfileRepository.LoadBuiltIn();
+    var detected = new RunningGameDetector().DetectAny(profiles);
+
+    var snapshot = await new LiveMonitor().SampleAsync(
+        TimeSpan.FromMilliseconds(350), detected?.ProcessId, detected?.Name);
+
+    return Results.Json(new
+    {
+        timestamp = snapshot.Timestamp.ToString("o"),
+        snapshot.SystemCpuPercent,
+        snapshot.RamUsedPercent,
+        snapshot.RamUsedBytes,
+        snapshot.RamTotalBytes,
+        snapshot.ProcessCount,
+        game = snapshot.GameName,
+        snapshot.GamePid,
+        topByCpu = snapshot.TopByCpu.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
+        topByMemory = snapshot.TopByMemory.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
+        alerts = snapshot.Alerts.Select(a => new { kind = a.Kind.ToString(), a.Level, a.Title, a.Detail }),
     });
 });
 
