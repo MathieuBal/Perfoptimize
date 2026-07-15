@@ -25,6 +25,7 @@ const NAV = [
   ["hardware", "Matériel"],
   ["system", "Système"],
   ["incidents", "Incidents"],
+  ["reseau", "Réseau"],
   ["tools", "Outils"],
 ];
 
@@ -37,7 +38,7 @@ const state = {
   openConfig: null,
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
-  library: null, libConfigs: {}, lastReport: null, incidents: null, live: null,
+  library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
 };
 
 let countdownTimer = null;
@@ -433,10 +434,10 @@ function renderApplyCard() {
 function viewLibrary() {
   const right = `<button class="btn" data-action="rescan-library">Rescanner</button>`;
   if (state.library === null) {
-    return `<div class="view">${head("03 — Jeux installés", "Analyse du disque", right)}<div class="empty"><span class="spinner-sm"></span> Analyse des bibliothèques Steam et Epic…</div></div>`;
+    return `<div class="view">${head("04 — Jeux installés", "Analyse du disque", right)}<div class="empty"><span class="spinner-sm"></span> Analyse des bibliothèques Steam et Epic…</div></div>`;
   }
   if (!state.library.length) {
-    return `<div class="view">${head("03 — Jeux installés", "Analyse du disque", right)}<div class="empty">Aucun jeu installé détecté (Steam ou Epic introuvable sur cette machine).</div></div>`;
+    return `<div class="view">${head("04 — Jeux installés", "Analyse du disque", right)}<div class="empty">Aucun jeu installé détecté (Steam ou Epic introuvable sur cette machine).</div></div>`;
   }
   const lead = `<p class="lead">Toutes les bibliothèques Steam de tous les disques + Epic Games. <span style="font-family:var(--mono);color:${C.accentSoft}">${state.library.length}</span> jeux découverts avec leur dossier et leurs fichiers de configuration.</p>`;
   const src = (name) => {
@@ -480,7 +481,7 @@ function viewLibrary() {
       ${expanded}
     </div>`;
   }).join("");
-  return `<div class="view">${head("03 — Jeux installés", "Analyse du disque", right)}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
+  return `<div class="view">${head("04 — Jeux installés", "Analyse du disque", right)}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
 }
 
 // ============================================================================
@@ -488,7 +489,7 @@ function viewLibrary() {
 // ============================================================================
 function viewHardware() {
   if (!state.hardware) {
-    return `<div class="view">${head("04 — Matériel détecté", "Configuration")}<div class="empty"><span class="spinner-sm"></span> Analyse du matériel…</div></div>`;
+    return `<div class="view">${head("05 — Matériel détecté", "Configuration")}<div class="empty"><span class="spinner-sm"></span> Analyse du matériel…</div></div>`;
   }
   const h = state.hardware;
   const gpu = primaryGpu(h);
@@ -508,7 +509,7 @@ function viewHardware() {
     spec("Système", h.os.name || "capteur absent", `${h.os.version ? "build " + h.os.version : ""}${h.os.architecture ? " · " + h.os.architecture : ""}`.replace(/^ · /, "") || "—"),
   ].join("");
   const note = `<div class="empty">Chaque capteur est sondé indépendamment et toutes les mesures sont nullables — « capteur absent » n'est jamais confondu avec « valeur zéro ».</div>`;
-  return `<div class="view">${head("04 — Matériel détecté", "Configuration")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">${specs}</div>${note}</div>`;
+  return `<div class="view">${head("05 — Matériel détecté", "Configuration")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">${specs}</div>${note}</div>`;
 }
 
 // ============================================================================
@@ -517,10 +518,10 @@ function viewHardware() {
 function viewSystem() {
   const lead = `<p class="lead">Au-delà d'un jeu précis — optimisations globales classées par gravité.</p>`;
   if (state.system === null) {
-    return `<div class="view">${head("05 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty"><span class="spinner-sm"></span> Analyse du système…</div></div>`;
+    return `<div class="view">${head("06 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty"><span class="spinner-sm"></span> Analyse du système…</div></div>`;
   }
   if (!state.system.length) {
-    return `<div class="view">${head("05 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty" style="color:${C.good}">✓ Rien à signaler — ta configuration est bien équilibrée.</div></div>`;
+    return `<div class="view">${head("06 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty" style="color:${C.good}">✓ Rien à signaler — ta configuration est bien équilibrée.</div></div>`;
   }
   const sev = { Warning: ["À corriger", C.bad], Suggestion: ["Conseillé", C.warn], Info: ["Info", C.accent] };
   const cards = state.system.map((a) => {
@@ -534,7 +535,7 @@ function viewSystem() {
       <div style="font-size:13.5px;color:#a9b3c1;line-height:1.6">${esc(a.detail)}</div>
     </div>`;
   }).join("");
-  return `<div class="view">${head("05 — Optimisation du PC", "Conseiller matériel")}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
+  return `<div class="view">${head("06 — Optimisation du PC", "Conseiller matériel")}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
 }
 
 // ============================================================================
@@ -567,7 +568,7 @@ function viewTools() {
     <p style="margin:0 0 18px;font-size:13.5px;color:#8b97a8;line-height:1.6">Chaque modification est précédée d'une sauvegarde horodatée. La restauration est chirurgicale : seule la clé testée revient à sa valeur d'origine. Restaure depuis le panneau « Appliquer » de l'analyse.</p>
     <div style="font-family:var(--mono);font-size:12px;color:#5e6a7b;line-height:1.7">Les sauvegardes sont créées automatiquement au moment d'appliquer un réglage.</div>
   </div>`;
-  return `<div class="view">${head("06 — Outils", "Mesure & sauvegardes")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${pmCard}${backupsCard}</div></div>`;
+  return `<div class="view">${head("09 — Outils", "Mesure & sauvegardes")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${pmCard}${backupsCard}</div></div>`;
 }
 
 // ============================================================================
@@ -638,6 +639,49 @@ function viewMoniteur() {
 }
 
 // ============================================================================
+//  VIEW: Réseau
+// ============================================================================
+const WELL_KNOWN_PORTS = { 80: "HTTP", 443: "HTTPS", 53: "DNS", 3389: "RDP", 445: "SMB", 22: "SSH", 3074: "Xbox", 27015: "Steam", 5222: "chat" };
+function viewReseau() {
+  const n = state.network;
+  const right = `<button class="btn" data-action="rescan-network">Rescanner</button>`;
+  const lead = `<p class="lead">Inventaire en lecture seule de l'activité TCP : les connexions établies (ce qui communique vers l'extérieur) et les ports ouverts en écoute. Utile pour repérer ce qui consomme la bande passante pendant le jeu ou un port inattendu. L'attribution par processus arrivera ensuite.</p>`;
+  if (n === null) {
+    return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture des connexions réseau…</div></div>`;
+  }
+  const statCard = (val, label, color) => `<div class="card" style="flex:1 1 200px">
+    <div style="font-family:var(--mono);font-size:34px;font-weight:700;color:${color}">${val}</div>
+    <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a8;margin-top:6px">${label}</div>
+  </div>`;
+
+  const remotes = (n.topRemotes || []);
+  const remoteRows = remotes.length
+    ? remotes.map((r) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #1b222d">
+        <span style="font-family:var(--mono);font-size:13px;color:#c3ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.address)}</span>
+        <span style="font-family:var(--mono);font-size:12px;color:#8b97a8;flex:none">${r.connections} conn.</span>
+      </div>`).join("")
+    : `<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucune connexion externe établie.</div>`;
+
+  const ports = (n.listeningPorts || []);
+  const portChips = ports.length
+    ? ports.map((p) => {
+        const lbl = WELL_KNOWN_PORTS[p];
+        return `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:6px;background:#0e131b;border:1px solid #1b222d;font-family:var(--mono);font-size:12px;color:#c3ccd8;margin:0 7px 7px 0">${p}${lbl ? `<span style="color:#5e6a7b">${lbl}</span>` : ""}</span>`;
+      }).join("")
+    : `<div style="font-size:13px;color:#5e6a7b">Aucun port en écoute détecté.</div>`;
+
+  return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}
+    <div style="display:flex;flex-wrap:wrap;gap:16px">
+      ${statCard(n.establishedCount, "Connexions établies", C.accentSoft)}
+      ${statCard(n.listeningCount, "Ports en écoute", C.warn)}
+    </div>
+    <div class="card">${cardHead("Connexions sortantes")}<div style="margin-top:2px">${remoteRows}</div></div>
+    <div class="card">${cardHead("Ports en écoute", C.warn)}<div style="margin-top:2px">${portChips}</div></div>
+    <div class="empty">Un port en écoute n'est pas un problème en soi (jeux, services Windows, launchers en ouvrent). Ce panneau sert à repérer l'inhabituel, pas à alarmer.</div>
+  </div>`;
+}
+
+// ============================================================================
 //  VIEW: Incidents & diagnostic
 // ============================================================================
 const INCIDENT_KINDS = {
@@ -658,14 +702,14 @@ function incidentWhen(iso) {
 function viewIncidents() {
   const lead = `<p class="lead">Post-mortem en lecture seule : Perfoptimize lit l'historique d'événements de Windows (14 derniers jours) et explique chaque incident — crash, écran bleu, plantage GPU, arrêt inattendu — avec sa cause probable et une solution. Rien n'est modifié.</p>`;
   if (state.incidents === null) {
-    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
+    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
   }
   if (!state.incidents.supported) {
-    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
+    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
   }
   const list = state.incidents.incidents || [];
   if (!list.length) {
-    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
+    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
   }
 
   // summary chips by kind
@@ -700,7 +744,7 @@ function viewIncidents() {
     </div>`;
   }).join("");
 
-  return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
+  return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
     <div style="display:flex;flex-wrap:wrap;gap:10px">${summary}</div>
     <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>
   </div>`;
@@ -709,7 +753,7 @@ function viewIncidents() {
 // ============================================================================
 //  Render + navigation
 // ============================================================================
-const VIEWS = { overview: viewOverview, analyse: viewAnalyse, moniteur: viewMoniteur, library: viewLibrary, hardware: viewHardware, system: viewSystem, incidents: viewIncidents, tools: viewTools };
+const VIEWS = { overview: viewOverview, analyse: viewAnalyse, moniteur: viewMoniteur, library: viewLibrary, hardware: viewHardware, system: viewSystem, incidents: viewIncidents, reseau: viewReseau, tools: viewTools };
 
 function render() {
   // nav
@@ -756,6 +800,7 @@ function setView(v) {
   if (v === "system" && state.system === null) loadSystem();
   if (v === "hardware" && !state.hardware) loadHardware();
   if (v === "incidents" && state.incidents === null) loadIncidents();
+  if (v === "reseau" && state.network === null) loadNetwork();
   if (v === "tools" && !state.tools) loadTools();
   render();
   window.scrollTo(0, 0); // a fresh view starts at the top, under the sticky topbar
@@ -839,6 +884,12 @@ async function loadIncidents() {
   try { state.incidents = await getJson("/api/incidents"); }
   catch { state.incidents = { supported: false, incidents: [] }; }
   if (state.view === "incidents") render();
+}
+
+async function loadNetwork() {
+  try { state.network = await getJson("/api/network"); }
+  catch { state.network = { establishedCount: 0, listeningCount: 0, topRemotes: [], listeningPorts: [] }; }
+  if (state.view === "reseau") render();
 }
 
 // ---- Live monitor (continuous polling) -------------------------------------
@@ -978,6 +1029,7 @@ $("content").addEventListener("click", (e) => {
     case "restore": doRestore(); break;
     case "install-pm": installPresentMon(); break;
     case "rescan-library": state.library = null; state.libConfigs = {}; state.openConfig = null; render(); loadLibrary(); break;
+    case "rescan-network": state.network = null; render(); loadNetwork(); break;
     case "toggle-config": {
       const idx = parseInt(a.dataset.idx, 10);
       if (state.openConfig === idx) { state.openConfig = null; render(); }

@@ -9,6 +9,7 @@ using Perfoptimize.Core.Hardware;
 using Perfoptimize.Core.Library;
 using Perfoptimize.Core.Live;
 using Perfoptimize.Core.Monitoring;
+using Perfoptimize.Core.Network;
 using Perfoptimize.Core.Monitoring.Frametimes;
 using Perfoptimize.Core.Monitoring.Windows;
 using Perfoptimize.Core.Optimization;
@@ -202,6 +203,21 @@ app.MapGet("/api/live", async () =>
         topByCpu = snapshot.TopByCpu.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
         topByMemory = snapshot.TopByMemory.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
         alerts = snapshot.Alerts.Select(a => new { kind = a.Kind.ToString(), a.Level, a.Title, a.Detail }),
+    });
+});
+
+// ----- Network: what is connected and listening ------------------------------
+app.MapGet("/api/network", () =>
+{
+    // Read-only inventory of TCP activity: established connections grouped by
+    // remote host, and the ports open for listening.
+    var snapshot = new NetworkReader().Read();
+    return Results.Json(new
+    {
+        snapshot.EstablishedCount,
+        snapshot.ListeningCount,
+        topRemotes = snapshot.TopRemotes.Select(r => new { r.Address, r.Connections }),
+        listeningPorts = snapshot.ListeningPorts,
     });
 });
 
