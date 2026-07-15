@@ -17,6 +17,11 @@ public sealed class FrametimeStatistics
     public int StutterCount { get; init; }
     /// <summary>Share of frames that are stutters, from 0 to 100.</summary>
     public double StutterPercent { get; init; }
+    /// <summary>
+    /// The instantaneous FPS over the capture, downsampled (time-ordered) to a
+    /// handful of points so a UI can plot the curve without shipping every frame.
+    /// </summary>
+    public IReadOnlyList<double> FpsSeries { get; init; } = Array.Empty<double>();
 }
 
 public static class FrametimeAnalyzer
@@ -50,7 +55,36 @@ public static class FrametimeAnalyzer
             AverageFrametimeMs = Math.Round(average, 2),
             StutterCount = stutters,
             StutterPercent = Math.Round(100.0 * stutters / valid.Count, 2),
+            FpsSeries = DownsampleToFps(valid),
         };
+    }
+
+    /// <summary>
+    /// Reduces the time-ordered frame times to at most <paramref name="maxPoints"/>
+    /// FPS samples by averaging consecutive frames into buckets — enough to draw a
+    /// representative curve without exposing thousands of raw frames.
+    /// </summary>
+    private static IReadOnlyList<double> DownsampleToFps(List<double> frametimesMs, int maxPoints = 90)
+    {
+        if (frametimesMs.Count == 0)
+            return Array.Empty<double>();
+
+        var bucketCount = Math.Min(maxPoints, frametimesMs.Count);
+        var series = new double[bucketCount];
+        for (var bucket = 0; bucket < bucketCount; bucket++)
+        {
+            var start = (int)((long)bucket * frametimesMs.Count / bucketCount);
+            var end = (int)((long)(bucket + 1) * frametimesMs.Count / bucketCount);
+            if (end <= start)
+                end = start + 1;
+
+            double sum = 0;
+            for (var i = start; i < end; i++)
+                sum += frametimesMs[i];
+            var averageMs = sum / (end - start);
+            series[bucket] = averageMs > 0 ? Math.Round(1000.0 / averageMs, 1) : 0;
+        }
+        return series;
     }
 
     private static double Median(List<double> values)

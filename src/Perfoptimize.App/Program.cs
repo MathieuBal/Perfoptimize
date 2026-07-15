@@ -153,7 +153,11 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         cpu = new { avg = summary.AverageCpuUsagePercent, busiestCore = summary.AverageMaxCoreUsagePercent, gameShare = summary.AverageGameCpuUsagePercent },
         gpu = new { avg = summary.AverageGpuUsagePercent, gameShare = summary.AverageGameGpuUsagePercent, tempC = summary.PeakGpuTemperatureC, clockMhz = summary.AverageGpuCoreClockMhz },
         memory = new { ram = summary.PeakRamUsagePercent, vram = summary.PeakVramUsagePercent },
-        fps = frametimes is null ? null : new { frametimes.AverageFps, frametimes.OnePercentLowFps, frametimes.StutterPercent },
+        fps = frametimes is null ? null : new
+        {
+            frametimes.AverageFps, frametimes.OnePercentLowFps, frametimes.StutterPercent,
+            frametimes.WorstFrametimeMs, series = frametimes.FpsSeries,
+        },
         bottleneck = new { type = analysis.Type.ToString(), confidence = analysis.Confidence.ToString(), analysis.Explanation },
         target = new { plan.TargetFps, plan.MeasuredAverageFps, plan.RequiredGainPercent, gainLow = plan.EstimatedGainLowPercent, gainHigh = plan.EstimatedGainHighPercent },
         recommendations = plan.Recommendations.Select(r => new
