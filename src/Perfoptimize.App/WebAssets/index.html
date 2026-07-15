@@ -4,85 +4,57 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Perfoptimize</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header>
-    <h1><span class="logo">🎮</span> Perfoptimize</h1>
-    <div class="tabs">
-      <button class="tab active" data-tab="games">🎮 Jeux</button>
-      <button class="tab" data-tab="system">🖥️ Système</button>
-      <button class="ghost" id="quit" title="Arrêter l'application">Quitter</button>
-    </div>
-  </header>
-
-  <main>
-    <!-- ===== Onglet Jeux ===== -->
-    <div class="tab-panel" id="panel-games">
-      <section class="card" id="game-card">
-        <h2>Jeu détecté</h2>
-        <div id="game"><span class="spinner"></span> Recherche…</div>
-      </section>
-
-      <section class="card" id="library-card">
-        <h2>Jeux installés (analyse du disque)</h2>
-        <p class="muted" id="library-hint" style="font-size:13px">
-          Perfoptimize peut parcourir tes bibliothèques Steam pour lister tes jeux installés et lire leurs
-          fichiers de configuration — même ceux sans profil détaillé.
-        </p>
-        <button id="scan-library">Scanner mes jeux installés</button>
-        <div id="library" style="margin-top:12px"></div>
-      </section>
-
-      <section class="card">
-        <h2>Analyser les performances</h2>
-        <div class="controls">
-          <label>Durée
-            <select id="seconds">
-              <option value="10">10 s</option>
-              <option value="30" selected>30 s</option>
-              <option value="60">60 s</option>
-            </select>
-          </label>
-          <label>Objectif
-            <select id="goal">
-              <option value="quality">Qualité</option>
-              <option value="balanced" selected>Équilibré</option>
-              <option value="performance">Performance</option>
-            </select>
-          </label>
-          <label>FPS visés
-            <input type="number" id="targetFps" min="30" max="360" step="1" value="60">
-          </label>
-          <button class="primary" id="run">Lancer l'analyse</button>
+  <div class="shell">
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">
+          <span class="brand-logo-arc"></span>
+          <span class="brand-logo-disc"></span>
+          <span class="brand-logo-dot"></span>
         </div>
-        <p class="muted" id="run-hint" style="margin-top:12px">
-          Lance ton jeu, reste dans une scène représentative, puis clique sur « Lancer l'analyse ».
-        </p>
-        <div id="results" class="hidden"></div>
-      </section>
+        <div>
+          <div class="brand-name">PERFOPTIMIZE</div>
+          <div class="brand-sub">cockpit d'optimisation</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot">
+        <div>interface locale <span id="version"></span></div>
+        <div class="sidebar-foot-dim">moteur partagé avec la CLI</div>
+      </div>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-session">
+          <span class="dot dot-good pulse"></span>
+          <span class="topbar-kicker">session</span>
+          <span id="topbar-game" class="topbar-game">—</span>
+          <span id="topbar-pid" class="topbar-pid"></span>
+        </div>
+        <div class="topbar-right">
+          <span id="pm-chip" class="pm-chip">PresentMon</span>
+          <button id="quit" class="btn-quit"><span class="quit-square"></span>Quitter</button>
+        </div>
+      </div>
+      <div class="content" id="content"></div>
+    </main>
+  </div>
+
+  <div id="quit-overlay" class="quit-overlay hidden">
+    <div class="quit-overlay-inner">
+      <div class="quit-overlay-title">Perfoptimize arrêté</div>
+      <div class="quit-overlay-sub">Tu peux fermer cet onglet en toute sécurité.</div>
     </div>
-
-    <!-- ===== Onglet Système ===== -->
-    <div class="tab-panel hidden" id="panel-system">
-      <section class="card" id="hardware-card">
-        <h2>Matériel</h2>
-        <div id="hardware"><span class="spinner"></span> Analyse en cours…</div>
-      </section>
-
-      <section class="card" id="system-card">
-        <h2>Optimisation du PC</h2>
-        <div id="system"><span class="spinner"></span> Analyse du système…</div>
-      </section>
-
-      <section class="card" id="tools-card">
-        <h2>Outils</h2>
-        <div id="tools"><span class="spinner"></span> Vérification…</div>
-      </section>
-    </div>
-  </main>
-
-  <footer>Perfoptimize — assistant d'optimisation de jeux · interface locale <span id="version"></span></footer>
+  </div>
 
   <script src="/app.js"></script>
 </body>

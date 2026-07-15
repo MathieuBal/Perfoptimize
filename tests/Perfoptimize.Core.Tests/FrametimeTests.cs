@@ -39,6 +39,47 @@ public class FrametimeTests
     }
 
     [Fact]
+    public void Analyze_downsamples_a_time_ordered_fps_series_capped_at_90_points()
+    {
+        // 300 stable 16.67 ms frames (~60 FPS) get bucketed down to 90 points,
+        // each still reporting ~60 FPS.
+        var stats = FrametimeAnalyzer.Analyze(Enumerable.Repeat(16.67, 300).ToList());
+
+        Assert.NotNull(stats);
+        Assert.Equal(90, stats.FpsSeries.Count);
+        Assert.All(stats.FpsSeries, fps => Assert.Equal(60.0, fps, precision: 0));
+    }
+
+    [Fact]
+    public void Analyze_keeps_one_fps_point_per_frame_when_below_the_cap()
+    {
+        // 10 ms frames = 100 FPS; fewer frames than buckets means one point each.
+        var stats = FrametimeAnalyzer.Analyze(Enumerable.Repeat(10.0, 5).ToList());
+
+        Assert.NotNull(stats);
+        Assert.Equal(5, stats.FpsSeries.Count);
+        Assert.All(stats.FpsSeries, fps => Assert.Equal(100.0, fps));
+    }
+
+    [Fact]
+    public void Analyze_fps_series_preserves_the_order_of_a_mid_capture_dip()
+    {
+        // A slow frame in the middle must show up as a dip in the middle of the
+        // series, not be reordered away.
+        var frametimes = Enumerable.Repeat(10.0, 20)
+            .Concat(Enumerable.Repeat(40.0, 20))
+            .Concat(Enumerable.Repeat(10.0, 20))
+            .ToList();
+
+        var stats = FrametimeAnalyzer.Analyze(frametimes);
+
+        Assert.NotNull(stats);
+        var series = stats.FpsSeries;
+        Assert.True(series[0] > series[series.Count / 2]);          // starts fast, dips in the middle
+        Assert.True(series[^1] > series[series.Count / 2]);         // recovers at the end
+    }
+
+    [Fact]
     public void ReadFrametimes_parses_presentmon_v1_columns()
     {
         const string csv = """
