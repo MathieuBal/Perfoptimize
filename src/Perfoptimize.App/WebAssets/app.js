@@ -20,9 +20,11 @@ const C = {
 const NAV = [
   ["overview", "Vue d'ensemble"],
   ["analyse", "Analyse"],
+  ["moniteur", "Moniteur"],
   ["library", "Jeux installés"],
   ["hardware", "Matériel"],
   ["system", "Système"],
+  ["incidents", "Incidents"],
   ["tools", "Outils"],
 ];
 
@@ -35,11 +37,13 @@ const state = {
   openConfig: null,
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
-  library: null, libConfigs: {}, lastReport: null,
+  library: null, libConfigs: {}, lastReport: null, incidents: null, live: null,
 };
 
 let countdownTimer = null;
 let chartResizeBound = false;
+let liveTimer = null;
+let liveBusy = false;
 
 // ---- helpers ---------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -48,6 +52,7 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
 const num = (v) => (v == null || Number.isNaN(v)) ? null : v;
 const pct = (v) => num(v) == null ? "n/a" : `${Math.round(v)}`;
 const gib = (b) => (b == null) ? null : `${(b / 1073741824).toFixed(1)} Gio`;
+const mib = (b) => (b == null) ? "—" : (b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} Gio` : `${Math.round(b / 1048576)} Mio`);
 
 async function getJson(url) {
   const r = await fetch(url);
@@ -566,9 +571,145 @@ function viewTools() {
 }
 
 // ============================================================================
+//  VIEW: Moniteur temps réel (analyse continue)
+// ============================================================================
+function procRow(u, mode) {
+  const isCpu = mode === "cpu";
+  const width = isCpu ? Math.min(100, u.cpuPercent) : (u.memoryPercent != null ? Math.min(100, u.memoryPercent) : 0);
+  const value = isCpu ? `${Math.round(u.cpuPercent)} %` : mib(u.memoryBytes);
+  const barColor = u.isGame ? C.accent : (isCpu ? usageColor(u.cpuPercent) : C.warn);
+  const nameColor = u.isGame ? C.accentSoft : "#c3ccd8";
+  return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #1b222d">
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:7px">
+        <span style="font-size:13px;color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.name)}</span>
+        ${u.isGame ? `<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:${C.accent};border:1px solid ${C.accent};border-radius:4px;padding:1px 5px">jeu</span>` : ""}
+      </div>
+      <div style="height:5px;background:#0e131b;border-radius:999px;overflow:hidden;margin-top:5px"><div style="height:100%;width:${width}%;background:${barColor};border-radius:999px"></div></div>
+    </div>
+    <span style="font-family:var(--mono);font-size:12.5px;color:#e7ecf3;width:64px;text-align:right;flex:none">${value}</span>
+    <span style="font-family:var(--mono);font-size:10px;color:#5e6a7b;width:52px;text-align:right;flex:none">pid ${u.pid}</span>
+  </div>`;
+}
+function viewMoniteur() {
+  const live = state.live;
+  const kicker = "03 — Analyse continue";
+  const right = `<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:${live ? C.good : "#5e6a7b"}"><span class="dot ${live ? "dot-good pulse" : ""}" style="width:8px;height:8px;${live ? "" : "background:#5e6a7b"}"></span>${live ? "en direct" : "démarrage…"}</div>`;
+  const lead = `<p class="lead">Perfoptimize échantillonne le PC en continu et attribue les ressources — pour voir en direct ce qui se dispute le CPU et la RAM avec ton jeu, et repérer un processus parasite avant qu'il ne provoque un freeze.</p>`;
+
+  if (!live) {
+    return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Démarrage du moniteur…</div></div>`;
+  }
+
+  const cpuGauge = gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true);
+  const ramGauge = live.ramUsedPercent != null
+    ? gauge({ label: "RAM", value: pct(live.ramUsedPercent), ringValue: live.ramUsedPercent, unit: "%", sub: `${gib(live.ramUsedBytes) || "?"} / ${gib(live.ramTotalBytes) || "?"}`, color: vramColor(live.ramUsedPercent) }, true)
+    : `<div class="card gauge" style="flex:1 1 168px;max-width:360px;padding:20px;justify-content:center"><div class="empty" style="border:none;background:none;padding:0;text-align:center">RAM système<br>non disponible</div></div>`;
+  const sessionCard = `<div class="card" style="flex:1 1 260px;display:flex;flex-direction:column;justify-content:center;gap:10px">
+    ${cardHead(live.game ? "Jeu en session" : "Aucun jeu détecté", live.game ? C.good : C.faint)}
+    <div style="font-size:20px;font-weight:700">${live.game ? esc(live.game) : "En veille"}</div>
+    <div style="font-family:var(--mono);font-size:11px;color:#5e6a7b">${live.game ? `pid ${live.gamePid} · ressources surveillées en direct` : "Lance un jeu : le moniteur attribuera automatiquement les ressources."}</div>
+  </div>`;
+
+  const alerts = (live.alerts || []).map((a) => {
+    const col = a.level === "bad" ? C.bad : a.level === "info" ? C.accent : C.warn;
+    return `<div class="card" style="padding:16px 20px;border-left:3px solid ${col}">
+      <div style="font-weight:600;font-size:14.5px;margin-bottom:4px;color:${col}">${esc(a.title)}</div>
+      <div style="font-size:13px;color:#a9b3c1;line-height:1.5">${esc(a.detail)}</div>
+    </div>`;
+  }).join("");
+  const alertsBlock = alerts
+    ? `<div style="display:flex;flex-direction:column;gap:10px">${alerts}</div>`
+    : `<div class="empty" style="color:${C.good}">✓ Rien ne se dispute les ressources en ce moment.</div>`;
+
+  const table = (title, rows, mode) => `<div class="card">
+    ${cardHead(title, mode === "cpu" ? C.accent : C.warn)}
+    ${rows.length ? rows.map((u) => procRow(u, mode)).join("") : `<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucun processus actif mesuré.</div>`}
+  </div>`;
+
+  return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}
+    <div style="display:flex;flex-wrap:wrap;gap:16px">${cpuGauge}${ramGauge}${sessionCard}</div>
+    ${alertsBlock}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      ${table("Top CPU", live.topByCpu || [], "cpu")}
+      ${table("Top mémoire", live.topByMemory || [], "mem")}
+    </div>
+  </div>`;
+}
+
+// ============================================================================
+//  VIEW: Incidents & diagnostic
+// ============================================================================
+const INCIDENT_KINDS = {
+  AppCrash: ["Crash appli", C.bad],
+  AppHang: ["Appli figée", C.warn],
+  GpuReset: ["Plantage GPU", C.bad],
+  BugCheck: ["Écran bleu", C.bad],
+  UnexpectedShutdown: ["Arrêt inattendu", C.warn],
+  OutOfMemory: ["Mémoire saturée", C.warn],
+  DiskError: ["Erreur disque", C.bad],
+};
+function incidentWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+function viewIncidents() {
+  const lead = `<p class="lead">Post-mortem en lecture seule : Perfoptimize lit l'historique d'événements de Windows (14 derniers jours) et explique chaque incident — crash, écran bleu, plantage GPU, arrêt inattendu — avec sa cause probable et une solution. Rien n'est modifié.</p>`;
+  if (state.incidents === null) {
+    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
+  }
+  if (!state.incidents.supported) {
+    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
+  }
+  const list = state.incidents.incidents || [];
+  if (!list.length) {
+    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
+  }
+
+  // summary chips by kind
+  const counts = {};
+  for (const i of list) counts[i.kind] = (counts[i.kind] || 0) + 1;
+  const summary = Object.keys(counts).map((k) => {
+    const [lbl, col] = INCIDENT_KINDS[k] || [k, C.faint];
+    return `<span style="display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:color-mix(in srgb, ${col} 14%, transparent);color:${col};font-family:var(--mono);font-size:12px"><span style="width:7px;height:7px;border-radius:50%;background:${col}"></span>${counts[k]} × ${esc(lbl)}</span>`;
+  }).join("");
+
+  const cards = list.map((i) => {
+    const [lbl, col] = INCIDENT_KINDS[i.kind] || [i.kind, C.faint];
+    const when = incidentWhen(i.when);
+    return `<div class="card" style="padding:20px 22px;border-left:3px solid ${col}">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="display:inline-flex;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${col};background:color-mix(in srgb, ${col} 16%, transparent)">${esc(lbl)}</span>
+        <span style="font-weight:600;font-size:15px">${esc(i.title)}</span>
+        ${i.process ? `<span style="font-family:var(--mono);font-size:11.5px;color:#8b97a8">${esc(i.process)}</span>` : ""}
+        ${when ? `<span style="font-family:var(--mono);font-size:11px;color:#5e6a7b;margin-left:auto">${esc(when)}</span>` : ""}
+      </div>
+      ${i.detail ? `<div style="font-size:13px;color:#a9b3c1;line-height:1.55;margin-bottom:12px">${esc(i.detail)}</div>` : ""}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="background:#0e131b;border:1px solid #1b222d;border-radius:11px;padding:13px 15px">
+          <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#5e6a7b;margin-bottom:6px">Cause probable</div>
+          <div style="font-size:13px;color:#c3ccd8;line-height:1.5">${esc(i.likelyCause)}</div>
+        </div>
+        <div style="background:#0e131b;border:1px solid #1b222d;border-radius:11px;padding:13px 15px">
+          <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${C.good};margin-bottom:6px">Solution</div>
+          <div style="font-size:13px;color:#c3ccd8;line-height:1.5">${esc(i.suggestedFix)}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
+    <div style="display:flex;flex-wrap:wrap;gap:10px">${summary}</div>
+    <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>
+  </div>`;
+}
+
+// ============================================================================
 //  Render + navigation
 // ============================================================================
-const VIEWS = { overview: viewOverview, analyse: viewAnalyse, library: viewLibrary, hardware: viewHardware, system: viewSystem, tools: viewTools };
+const VIEWS = { overview: viewOverview, analyse: viewAnalyse, moniteur: viewMoniteur, library: viewLibrary, hardware: viewHardware, system: viewSystem, incidents: viewIncidents, tools: viewTools };
 
 function render() {
   // nav
@@ -607,14 +748,18 @@ function render() {
 }
 
 function setView(v) {
+  // The Moniteur polls continuously; stop it as soon as we leave the view.
+  if (state.view === "moniteur" && v !== "moniteur") stopLive();
   state.view = v;
   // lazy loads
   if (v === "library" && state.library === null) loadLibrary();
   if (v === "system" && state.system === null) loadSystem();
   if (v === "hardware" && !state.hardware) loadHardware();
+  if (v === "incidents" && state.incidents === null) loadIncidents();
   if (v === "tools" && !state.tools) loadTools();
   render();
   window.scrollTo(0, 0); // a fresh view starts at the top, under the sticky topbar
+  if (v === "moniteur") startLive();
 }
 
 // ---- FPS canvas chart ------------------------------------------------------
@@ -689,6 +834,31 @@ async function loadSystem() {
 async function loadLibrary() {
   try { const r = await getJson("/api/library"); state.library = r.games || []; } catch { state.library = []; }
   if (state.view === "library") render();
+}
+async function loadIncidents() {
+  try { state.incidents = await getJson("/api/incidents"); }
+  catch { state.incidents = { supported: false, incidents: [] }; }
+  if (state.view === "incidents") render();
+}
+
+// ---- Live monitor (continuous polling) -------------------------------------
+async function loadLiveOnce() {
+  if (liveBusy) return; // never overlap two samples
+  liveBusy = true;
+  try {
+    const r = await getJson("/api/live");
+    state.live = r;
+    if (state.view === "moniteur") render();
+  } catch { /* transient; keep the last snapshot on screen */ }
+  finally { liveBusy = false; }
+}
+function startLive() {
+  if (liveTimer) return;
+  loadLiveOnce();
+  liveTimer = setInterval(loadLiveOnce, 2000);
+}
+function stopLive() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
 }
 async function loadVersion() {
   try { const v = await getJson("/api/version"); $("version").textContent = `· v${v.version}`; } catch { /* non-essential */ }
@@ -832,6 +1002,7 @@ $("content").addEventListener("change", (e) => {
 });
 
 $("quit").addEventListener("click", async () => {
+  stopLive();
   try { await postJson("/api/shutdown"); } catch { /* server stops */ }
   $("quit-overlay").classList.remove("hidden");
 });

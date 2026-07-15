@@ -3,9 +3,11 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Perfoptimize.App;
 using Perfoptimize.Core.Configs;
+using Perfoptimize.Core.Diagnostics;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Hardware;
 using Perfoptimize.Core.Library;
+using Perfoptimize.Core.Live;
 using Perfoptimize.Core.Monitoring;
 using Perfoptimize.Core.Monitoring.Frametimes;
 using Perfoptimize.Core.Monitoring.Windows;
@@ -172,6 +174,61 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         advisories = plan.Advisories.Select(a => new
         {
             a.Setting, kind = a.Kind.ToString(), a.Recommendation, a.Detail, evidence = a.Evidence.ToString(),
+        }),
+    });
+});
+
+// ----- Live: continuous whole-PC monitoring ----------------------------------
+app.MapGet("/api/live", async () =>
+{
+    // One instant of the whole machine: system CPU/RAM, the busiest processes,
+    // and what is competing with the running game right now. The UI polls this.
+    var profiles = GameProfileRepository.LoadBuiltIn();
+    var detected = new RunningGameDetector().DetectAny(profiles);
+
+    var snapshot = await new LiveMonitor().SampleAsync(
+        TimeSpan.FromMilliseconds(350), detected?.ProcessId, detected?.Name);
+
+    return Results.Json(new
+    {
+        timestamp = snapshot.Timestamp.ToString("o"),
+        snapshot.SystemCpuPercent,
+        snapshot.RamUsedPercent,
+        snapshot.RamUsedBytes,
+        snapshot.RamTotalBytes,
+        snapshot.ProcessCount,
+        game = snapshot.GameName,
+        snapshot.GamePid,
+        topByCpu = snapshot.TopByCpu.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
+        topByMemory = snapshot.TopByMemory.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
+        alerts = snapshot.Alerts.Select(a => new { kind = a.Kind.ToString(), a.Level, a.Title, a.Detail }),
+    });
+});
+
+// ----- Diagnostics: explain recent freezes / crashes -------------------------
+app.MapGet("/api/incidents", () =>
+{
+    // Read-only post-mortem: reads the Windows event history and explains each
+    // stability incident (crash, hang, GPU reset, BSOD, unexpected shutdown,
+    // out-of-memory, disk error) with a likely cause and a concrete fix.
+    if (!OperatingSystem.IsWindows())
+        return Results.Json(new { supported = false, incidents = Array.Empty<object>() });
+
+    var records = new WindowsEventLogReader().ReadRecent(TimeSpan.FromDays(14));
+    var incidents = IncidentClassifier.ClassifyAll(records).Take(60);
+    return Results.Json(new
+    {
+        supported = true,
+        incidents = incidents.Select(i => new
+        {
+            kind = i.Kind.ToString(),
+            severity = i.Severity.ToString(),
+            when = i.When?.ToString("o"),
+            i.Process,
+            i.Title,
+            i.Detail,
+            i.LikelyCause,
+            i.SuggestedFix,
         }),
     });
 });
