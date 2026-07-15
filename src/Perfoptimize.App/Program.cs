@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Perfoptimize.App;
 using Perfoptimize.Core.Configs;
+using Perfoptimize.Core.Diagnostics;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Hardware;
 using Perfoptimize.Core.Library;
@@ -172,6 +173,34 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         advisories = plan.Advisories.Select(a => new
         {
             a.Setting, kind = a.Kind.ToString(), a.Recommendation, a.Detail, evidence = a.Evidence.ToString(),
+        }),
+    });
+});
+
+// ----- Diagnostics: explain recent freezes / crashes -------------------------
+app.MapGet("/api/incidents", () =>
+{
+    // Read-only post-mortem: reads the Windows event history and explains each
+    // stability incident (crash, hang, GPU reset, BSOD, unexpected shutdown,
+    // out-of-memory, disk error) with a likely cause and a concrete fix.
+    if (!OperatingSystem.IsWindows())
+        return Results.Json(new { supported = false, incidents = Array.Empty<object>() });
+
+    var records = new WindowsEventLogReader().ReadRecent(TimeSpan.FromDays(14));
+    var incidents = IncidentClassifier.ClassifyAll(records).Take(60);
+    return Results.Json(new
+    {
+        supported = true,
+        incidents = incidents.Select(i => new
+        {
+            kind = i.Kind.ToString(),
+            severity = i.Severity.ToString(),
+            when = i.When?.ToString("o"),
+            i.Process,
+            i.Title,
+            i.Detail,
+            i.LikelyCause,
+            i.SuggestedFix,
         }),
     });
 });

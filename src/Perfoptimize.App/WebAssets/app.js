@@ -23,6 +23,7 @@ const NAV = [
   ["library", "Jeux installés"],
   ["hardware", "Matériel"],
   ["system", "Système"],
+  ["incidents", "Incidents"],
   ["tools", "Outils"],
 ];
 
@@ -35,7 +36,7 @@ const state = {
   openConfig: null,
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
-  library: null, libConfigs: {}, lastReport: null,
+  library: null, libConfigs: {}, lastReport: null, incidents: null,
 };
 
 let countdownTimer = null;
@@ -566,9 +567,78 @@ function viewTools() {
 }
 
 // ============================================================================
+//  VIEW: Incidents & diagnostic
+// ============================================================================
+const INCIDENT_KINDS = {
+  AppCrash: ["Crash appli", C.bad],
+  AppHang: ["Appli figée", C.warn],
+  GpuReset: ["Plantage GPU", C.bad],
+  BugCheck: ["Écran bleu", C.bad],
+  UnexpectedShutdown: ["Arrêt inattendu", C.warn],
+  OutOfMemory: ["Mémoire saturée", C.warn],
+  DiskError: ["Erreur disque", C.bad],
+};
+function incidentWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+function viewIncidents() {
+  const lead = `<p class="lead">Post-mortem en lecture seule : Perfoptimize lit l'historique d'événements de Windows (14 derniers jours) et explique chaque incident — crash, écran bleu, plantage GPU, arrêt inattendu — avec sa cause probable et une solution. Rien n'est modifié.</p>`;
+  if (state.incidents === null) {
+    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
+  }
+  if (!state.incidents.supported) {
+    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
+  }
+  const list = state.incidents.incidents || [];
+  if (!list.length) {
+    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
+  }
+
+  // summary chips by kind
+  const counts = {};
+  for (const i of list) counts[i.kind] = (counts[i.kind] || 0) + 1;
+  const summary = Object.keys(counts).map((k) => {
+    const [lbl, col] = INCIDENT_KINDS[k] || [k, C.faint];
+    return `<span style="display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:color-mix(in srgb, ${col} 14%, transparent);color:${col};font-family:var(--mono);font-size:12px"><span style="width:7px;height:7px;border-radius:50%;background:${col}"></span>${counts[k]} × ${esc(lbl)}</span>`;
+  }).join("");
+
+  const cards = list.map((i) => {
+    const [lbl, col] = INCIDENT_KINDS[i.kind] || [i.kind, C.faint];
+    const when = incidentWhen(i.when);
+    return `<div class="card" style="padding:20px 22px;border-left:3px solid ${col}">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="display:inline-flex;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${col};background:color-mix(in srgb, ${col} 16%, transparent)">${esc(lbl)}</span>
+        <span style="font-weight:600;font-size:15px">${esc(i.title)}</span>
+        ${i.process ? `<span style="font-family:var(--mono);font-size:11.5px;color:#8b97a8">${esc(i.process)}</span>` : ""}
+        ${when ? `<span style="font-family:var(--mono);font-size:11px;color:#5e6a7b;margin-left:auto">${esc(when)}</span>` : ""}
+      </div>
+      ${i.detail ? `<div style="font-size:13px;color:#a9b3c1;line-height:1.55;margin-bottom:12px">${esc(i.detail)}</div>` : ""}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="background:#0e131b;border:1px solid #1b222d;border-radius:11px;padding:13px 15px">
+          <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#5e6a7b;margin-bottom:6px">Cause probable</div>
+          <div style="font-size:13px;color:#c3ccd8;line-height:1.5">${esc(i.likelyCause)}</div>
+        </div>
+        <div style="background:#0e131b;border:1px solid #1b222d;border-radius:11px;padding:13px 15px">
+          <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${C.good};margin-bottom:6px">Solution</div>
+          <div style="font-size:13px;color:#c3ccd8;line-height:1.5">${esc(i.suggestedFix)}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
+    <div style="display:flex;flex-wrap:wrap;gap:10px">${summary}</div>
+    <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>
+  </div>`;
+}
+
+// ============================================================================
 //  Render + navigation
 // ============================================================================
-const VIEWS = { overview: viewOverview, analyse: viewAnalyse, library: viewLibrary, hardware: viewHardware, system: viewSystem, tools: viewTools };
+const VIEWS = { overview: viewOverview, analyse: viewAnalyse, library: viewLibrary, hardware: viewHardware, system: viewSystem, incidents: viewIncidents, tools: viewTools };
 
 function render() {
   // nav
@@ -612,6 +682,7 @@ function setView(v) {
   if (v === "library" && state.library === null) loadLibrary();
   if (v === "system" && state.system === null) loadSystem();
   if (v === "hardware" && !state.hardware) loadHardware();
+  if (v === "incidents" && state.incidents === null) loadIncidents();
   if (v === "tools" && !state.tools) loadTools();
   render();
   window.scrollTo(0, 0); // a fresh view starts at the top, under the sticky topbar
@@ -689,6 +760,11 @@ async function loadSystem() {
 async function loadLibrary() {
   try { const r = await getJson("/api/library"); state.library = r.games || []; } catch { state.library = []; }
   if (state.view === "library") render();
+}
+async function loadIncidents() {
+  try { state.incidents = await getJson("/api/incidents"); }
+  catch { state.incidents = { supported: false, incidents: [] }; }
+  if (state.view === "incidents") render();
 }
 async function loadVersion() {
   try { const v = await getJson("/api/version"); $("version").textContent = `· v${v.version}`; } catch { /* non-essential */ }
