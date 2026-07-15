@@ -39,12 +39,15 @@ const state = {
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
   library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
+  alerts: [],
 };
 
 let countdownTimer = null;
 let chartResizeBound = false;
 let liveTimer = null;
 let liveBusy = false;
+let liveFirstPoll = true;
+const seenAlertIds = new Set();
 
 // ---- helpers ---------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -665,6 +668,8 @@ function viewMoniteur() {
     gauges.push(gauge({ label: "Temp CPU", value: Math.round(live.cpuTemperatureC), ringValue: live.cpuTemperatureC, unit: "°", sub: "", color: cpuTempColor(live.cpuTemperatureC) }, true));
   if (live.gpuTemperatureC != null)
     gauges.push(gauge({ label: "Temp GPU", value: Math.round(live.gpuTemperatureC), ringValue: live.gpuTemperatureC, unit: "°", sub: live.gpuThrottling ? "throttling" : "", color: live.gpuThrottling ? C.bad : tempColor(live.gpuTemperatureC) }, true));
+  if (live.dpcPercent != null)
+    gauges.push(gauge({ label: "Latence DPC", value: live.dpcPercent.toFixed(1), ringValue: Math.min(100, live.dpcPercent * 5), unit: "%", sub: live.interruptPercent != null ? `ISR ${live.interruptPercent.toFixed(1)} %` : "", color: live.dpcPercent >= 8 ? C.bad : live.dpcPercent >= 4 ? C.warn : C.good }, true));
 
   const noTemp = live.cpuTemperatureC == null && live.gpuTemperatureC == null;
   const tempNote = noTemp
@@ -858,8 +863,6 @@ function render() {
 }
 
 function setView(v) {
-  // The Moniteur polls continuously; stop it as soon as we leave the view.
-  if (state.view === "moniteur" && v !== "moniteur") stopLive();
   state.view = v;
   // lazy loads
   if (v === "library" && state.library === null) loadLibrary();
@@ -870,7 +873,6 @@ function setView(v) {
   if (v === "tools" && !state.tools) loadTools();
   render();
   window.scrollTo(0, 0); // a fresh view starts at the top, under the sticky topbar
-  if (v === "moniteur") startLive();
 }
 
 // ---- FPS canvas chart ------------------------------------------------------
@@ -958,24 +960,64 @@ async function loadNetwork() {
   if (state.view === "reseau") render();
 }
 
-// ---- Live monitor (continuous polling) -------------------------------------
-async function loadLiveOnce() {
-  if (liveBusy) return; // never overlap two samples
+// ---- Live monitor (global continuous polling) ------------------------------
+// The backend samples continuously on its own; the UI polls it from every view
+// so alerts (overheating, a resource hog, driver latency) surface even when the
+// user is not on the Moniteur.
+async function pollLive() {
+  if (liveBusy) return;
   liveBusy = true;
   try {
     const r = await getJson("/api/live");
     state.live = r;
+    state.alerts = r.alerts || [];
+    if (liveFirstPoll) {
+      // Don't fire a burst of notifications for conditions already active at startup.
+      for (const a of state.alerts) seenAlertIds.add(a.id);
+      liveFirstPoll = false;
+    } else {
+      for (const a of state.alerts) {
+        if (seenAlertIds.has(a.id)) continue;
+        seenAlertIds.add(a.id);
+        notifyAlert(a);
+      }
+    }
+    updateAlertChip();
     if (state.view === "moniteur") render();
   } catch { /* transient; keep the last snapshot on screen */ }
   finally { liveBusy = false; }
 }
-function startLive() {
+function startGlobalLive() {
   if (liveTimer) return;
-  loadLiveOnce();
-  liveTimer = setInterval(loadLiveOnce, 2000);
+  pollLive();
+  liveTimer = setInterval(pollLive, 3000);
 }
 function stopLive() {
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+}
+function notifyAlert(a) {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted")
+      new Notification("Perfoptimize — " + a.title, { body: a.detail, tag: "perfoptimize-" + a.id });
+  } catch { /* notifications are a bonus, never required */ }
+}
+function ensureNotifyPermission() {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "default")
+      Notification.requestPermission();
+  } catch { /* ignore */ }
+}
+function updateAlertChip() {
+  const chip = $("alert-chip");
+  if (!chip) return;
+  const active = state.alerts || [];
+  if (!active.length) { chip.classList.add("hidden"); return; }
+  const color = active.some((a) => a.level === "bad") ? C.bad : C.warn;
+  chip.classList.remove("hidden");
+  chip.style.color = color;
+  chip.style.borderColor = color;
+  const count = $("alert-count");
+  if (count) count.textContent = String(active.length);
 }
 async function loadVersion() {
   try { const v = await getJson("/api/version"); $("version").textContent = `· v${v.version}`; } catch { /* non-essential */ }
@@ -1126,8 +1168,14 @@ $("quit").addEventListener("click", async () => {
 });
 
 // ---- boot ------------------------------------------------------------------
+document.addEventListener("click", ensureNotifyPermission, { once: true });
+const alertChip = $("alert-chip");
+if (alertChip) alertChip.addEventListener("click", () => setView("moniteur"));
+
 render();
 loadGames();
 loadHardware();
 loadTools();
 loadVersion();
+startGlobalLive(); // continuous, from every view
+
