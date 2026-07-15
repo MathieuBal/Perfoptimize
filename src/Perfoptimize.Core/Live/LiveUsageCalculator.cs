@@ -12,6 +12,8 @@ public static class LiveUsageCalculator
     private const double HogCpuPercent = 25;
     private const double HighSystemCpuPercent = 90;
     private const double HighRamPercent = 90;
+    private const double HotGpuC = 87;
+    private const double HotCpuC = 95;
 
     public static LiveSnapshot Compute(
         IReadOnlyList<ProcessTimes> before,
@@ -22,6 +24,11 @@ public static class LiveUsageCalculator
         long? ramUsedBytes,
         int? gamePid,
         string? gameName,
+        double? gpuPercent = null,
+        double? vramPercent = null,
+        double? cpuTemperatureC = null,
+        double? gpuTemperatureC = null,
+        bool? gpuThrottling = null,
         int topN = 6)
     {
         var previousCpu = new Dictionary<int, TimeSpan>(before.Count);
@@ -80,17 +87,24 @@ public static class LiveUsageCalculator
             RamTotalBytes = ramTotalBytes,
             RamUsedBytes = ramUsedBytes,
             RamUsedPercent = ramPercent,
+            GpuPercent = gpuPercent,
+            VramPercent = vramPercent,
+            CpuTemperatureC = cpuTemperatureC,
+            GpuTemperatureC = gpuTemperatureC,
+            GpuThrottling = gpuThrottling,
             ProcessCount = after.Count,
             GamePid = gamePid,
             GameName = gameName,
             TopByCpu = topByCpu,
             TopByMemory = topByMemory,
-            Alerts = BuildAlerts(usages, systemCpu, ramPercent, gameName),
+            Alerts = BuildAlerts(usages, systemCpu, ramPercent, gameName,
+                cpuTemperatureC, gpuTemperatureC, gpuThrottling),
         };
     }
 
     private static IReadOnlyList<LiveAlert> BuildAlerts(
-        IReadOnlyList<ProcessUsage> usages, double systemCpu, double? ramPercent, string? gameName)
+        IReadOnlyList<ProcessUsage> usages, double systemCpu, double? ramPercent, string? gameName,
+        double? cpuTemperatureC, double? gpuTemperatureC, bool? gpuThrottling)
     {
         var alerts = new List<LiveAlert>();
 
@@ -132,6 +146,35 @@ public static class LiveUsageCalculator
                 Title = $"Mémoire quasi pleine ({rp:0} %)",
                 Detail = "La RAM sature : Windows va paginer sur le disque, source de gros à-coups. " +
                          "Ferme des applications en arrière-plan.",
+            });
+        }
+
+        // Thermals: a throttling or very hot GPU directly costs FPS and causes
+        // micro-freezes; a very hot CPU throttles and can trigger shutdowns.
+        if (gpuThrottling == true || gpuTemperatureC >= HotGpuC)
+        {
+            alerts.Add(new LiveAlert
+            {
+                Kind = LiveAlertKind.Thermal,
+                Level = "bad",
+                Title = gpuThrottling == true
+                    ? $"GPU en throttling thermique ({gpuTemperatureC:0} °C)"
+                    : $"GPU très chaud ({gpuTemperatureC:0} °C)",
+                Detail = "Au-delà du seuil, le GPU baisse ses fréquences pour se protéger — perte de FPS " +
+                         "et micro-freezes. Dépoussière ventilateurs et radiateur, améliore le flux d'air " +
+                         "du boîtier, et envisage de refaire la pâte thermique si les températures restent hautes.",
+            });
+        }
+        if (cpuTemperatureC >= HotCpuC)
+        {
+            alerts.Add(new LiveAlert
+            {
+                Kind = LiveAlertKind.Thermal,
+                Level = "bad",
+                Title = $"CPU très chaud ({cpuTemperatureC:0} °C)",
+                Detail = "Le processeur approche de sa limite et va réduire ses fréquences (throttling), " +
+                         "voire déclencher un arrêt de protection. Vérifie le ventirad et la pâte thermique, " +
+                         "et nettoie les entrées d'air.",
             });
         }
 

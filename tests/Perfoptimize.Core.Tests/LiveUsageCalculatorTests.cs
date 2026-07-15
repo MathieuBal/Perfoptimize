@@ -77,6 +77,41 @@ public class LiveUsageCalculatorTests
     }
 
     [Fact]
+    public void A_hot_or_throttling_gpu_raises_a_thermal_alert_and_carries_the_readings()
+    {
+        var reading = new[] { P(1, "game", 0, GiB) };
+
+        var hot = LiveUsageCalculator.Compute(
+            reading, reading, TimeSpan.FromMilliseconds(1000), cpuCount: 4,
+            ramTotalBytes: null, ramUsedBytes: null, gamePid: 1, gameName: "game",
+            gpuPercent: 99, vramPercent: 80, cpuTemperatureC: 60, gpuTemperatureC: 90, gpuThrottling: false);
+
+        Assert.Equal(99, hot.GpuPercent);
+        Assert.Equal(90, hot.GpuTemperatureC);
+        Assert.Contains(hot.Alerts, a => a.Kind == LiveAlertKind.Thermal);
+
+        // Throttling flag alone (even at a lower temperature) still alerts.
+        var throttling = LiveUsageCalculator.Compute(
+            reading, reading, TimeSpan.FromMilliseconds(1000), cpuCount: 4,
+            ramTotalBytes: null, ramUsedBytes: null, gamePid: 1, gameName: "game",
+            gpuTemperatureC: 70, gpuThrottling: true);
+        Assert.Contains(throttling.Alerts, a => a.Kind == LiveAlertKind.Thermal);
+    }
+
+    [Fact]
+    public void Cool_temperatures_raise_no_thermal_alert()
+    {
+        var reading = new[] { P(1, "game", 0, GiB) };
+
+        var snap = LiveUsageCalculator.Compute(
+            reading, reading, TimeSpan.FromMilliseconds(1000), cpuCount: 4,
+            ramTotalBytes: null, ramUsedBytes: null, gamePid: 1, gameName: "game",
+            cpuTemperatureC: 55, gpuTemperatureC: 65, gpuThrottling: false);
+
+        Assert.DoesNotContain(snap.Alerts, a => a.Kind == LiveAlertKind.Thermal);
+    }
+
+    [Fact]
     public void Memory_percent_is_null_when_total_ram_is_unknown()
     {
         var reading = new[] { P(1, "x", 0, GiB) };

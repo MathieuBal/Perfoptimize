@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Perfoptimize.Core.Monitoring;
 
 namespace Perfoptimize.Core.Live;
 
@@ -19,10 +20,34 @@ public sealed class LiveMonitor
         var after = ReadProcessTimes();
 
         var (ramTotal, ramUsed) = SystemMemoryReader.Read();
+        var telemetry = TrySampleTelemetry(gamePid);
 
         return LiveUsageCalculator.Compute(
             before, after, window, Environment.ProcessorCount,
-            ramTotal, ramUsed, gamePid, gameName);
+            ramTotal, ramUsed, gamePid, gameName,
+            gpuPercent: telemetry?.GpuUsagePercent,
+            vramPercent: telemetry?.VramUsagePercent,
+            cpuTemperatureC: telemetry?.CpuTemperatureC,
+            gpuTemperatureC: telemetry?.GpuTemperatureC,
+            gpuThrottling: telemetry?.GpuThermalThrottleActive);
+    }
+
+    /// <summary>
+    /// One best-effort telemetry sample for GPU load and temperatures. GPU load
+    /// and temps are instantaneous readings (unlike CPU, they need no priming),
+    /// so a single sample is meaningful. Never fatal — the monitor still works
+    /// on process figures alone if telemetry is unavailable.
+    /// </summary>
+    private static TelemetrySample? TrySampleTelemetry(int? gamePid)
+    {
+        try
+        {
+            return PerformanceMonitor.CreateForCurrentPlatform().Sample(gamePid);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static IReadOnlyList<ProcessTimes> ReadProcessTimes()

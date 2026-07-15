@@ -25,6 +25,7 @@ const NAV = [
   ["hardware", "Matériel"],
   ["system", "Système"],
   ["incidents", "Incidents"],
+  ["reseau", "Réseau"],
   ["tools", "Outils"],
 ];
 
@@ -37,7 +38,7 @@ const state = {
   openConfig: null,
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
-  library: null, libConfigs: {}, lastReport: null, incidents: null, live: null,
+  library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
 };
 
 let countdownTimer = null;
@@ -72,6 +73,7 @@ async function postJson(url, body) {
 function usageColor(v) { if (v == null) return C.faint; if (v >= 90) return C.bad; if (v >= 75) return C.warn; return C.good; }
 function vramColor(v) { if (v == null) return C.faint; if (v >= 88) return C.bad; if (v >= 70) return C.warn; return C.good; }
 function tempColor(v) { if (v == null) return C.faint; if (v >= 85) return C.bad; if (v >= 75) return C.warn; return C.good; }
+function cpuTempColor(v) { if (v == null) return C.faint; if (v >= 90) return C.bad; if (v >= 80) return C.warn; return C.good; }
 
 // ---- small view builders ---------------------------------------------------
 function ring(v, c) {
@@ -433,10 +435,10 @@ function renderApplyCard() {
 function viewLibrary() {
   const right = `<button class="btn" data-action="rescan-library">Rescanner</button>`;
   if (state.library === null) {
-    return `<div class="view">${head("03 — Jeux installés", "Analyse du disque", right)}<div class="empty"><span class="spinner-sm"></span> Analyse des bibliothèques Steam et Epic…</div></div>`;
+    return `<div class="view">${head("04 — Jeux installés", "Analyse du disque", right)}<div class="empty"><span class="spinner-sm"></span> Analyse des bibliothèques Steam et Epic…</div></div>`;
   }
   if (!state.library.length) {
-    return `<div class="view">${head("03 — Jeux installés", "Analyse du disque", right)}<div class="empty">Aucun jeu installé détecté (Steam ou Epic introuvable sur cette machine).</div></div>`;
+    return `<div class="view">${head("04 — Jeux installés", "Analyse du disque", right)}<div class="empty">Aucun jeu installé détecté (Steam ou Epic introuvable sur cette machine).</div></div>`;
   }
   const lead = `<p class="lead">Toutes les bibliothèques Steam de tous les disques + Epic Games. <span style="font-family:var(--mono);color:${C.accentSoft}">${state.library.length}</span> jeux découverts avec leur dossier et leurs fichiers de configuration.</p>`;
   const src = (name) => {
@@ -480,7 +482,7 @@ function viewLibrary() {
       ${expanded}
     </div>`;
   }).join("");
-  return `<div class="view">${head("03 — Jeux installés", "Analyse du disque", right)}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
+  return `<div class="view">${head("04 — Jeux installés", "Analyse du disque", right)}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
 }
 
 // ============================================================================
@@ -488,7 +490,7 @@ function viewLibrary() {
 // ============================================================================
 function viewHardware() {
   if (!state.hardware) {
-    return `<div class="view">${head("04 — Matériel détecté", "Configuration")}<div class="empty"><span class="spinner-sm"></span> Analyse du matériel…</div></div>`;
+    return `<div class="view">${head("05 — Matériel détecté", "Configuration")}<div class="empty"><span class="spinner-sm"></span> Analyse du matériel…</div></div>`;
   }
   const h = state.hardware;
   const gpu = primaryGpu(h);
@@ -508,7 +510,7 @@ function viewHardware() {
     spec("Système", h.os.name || "capteur absent", `${h.os.version ? "build " + h.os.version : ""}${h.os.architecture ? " · " + h.os.architecture : ""}`.replace(/^ · /, "") || "—"),
   ].join("");
   const note = `<div class="empty">Chaque capteur est sondé indépendamment et toutes les mesures sont nullables — « capteur absent » n'est jamais confondu avec « valeur zéro ».</div>`;
-  return `<div class="view">${head("04 — Matériel détecté", "Configuration")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">${specs}</div>${note}</div>`;
+  return `<div class="view">${head("05 — Matériel détecté", "Configuration")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">${specs}</div>${note}</div>`;
 }
 
 // ============================================================================
@@ -517,10 +519,10 @@ function viewHardware() {
 function viewSystem() {
   const lead = `<p class="lead">Au-delà d'un jeu précis — optimisations globales classées par gravité.</p>`;
   if (state.system === null) {
-    return `<div class="view">${head("05 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty"><span class="spinner-sm"></span> Analyse du système…</div></div>`;
+    return `<div class="view">${head("06 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty"><span class="spinner-sm"></span> Analyse du système…</div></div>`;
   }
   if (!state.system.length) {
-    return `<div class="view">${head("05 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty" style="color:${C.good}">✓ Rien à signaler — ta configuration est bien équilibrée.</div></div>`;
+    return `<div class="view">${head("06 — Optimisation du PC", "Conseiller matériel")}${lead}<div class="empty" style="color:${C.good}">✓ Rien à signaler — ta configuration est bien équilibrée.</div></div>`;
   }
   const sev = { Warning: ["À corriger", C.bad], Suggestion: ["Conseillé", C.warn], Info: ["Info", C.accent] };
   const cards = state.system.map((a) => {
@@ -534,40 +536,90 @@ function viewSystem() {
       <div style="font-size:13.5px;color:#a9b3c1;line-height:1.6">${esc(a.detail)}</div>
     </div>`;
   }).join("");
-  return `<div class="view">${head("05 — Optimisation du PC", "Conseiller matériel")}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
+  return `<div class="view">${head("06 — Optimisation du PC", "Conseiller matériel")}${lead}<div style="display:flex;flex-direction:column;gap:12px">${cards}</div></div>`;
 }
 
 // ============================================================================
 //  VIEW: 06 — Outils
 // ============================================================================
+// Catalogue d'outils : décrits d'abord, installés/intégrés ensuite. Seul
+// PresentMon est câblé aujourd'hui ; les autres sont documentés pour que tu
+// saches à quoi ils servent avant de décider.
+const TOOLS_CATALOG = [
+  {
+    id: "presentmon", name: "PresentMon", category: "Mesure FPS", core: true,
+    purpose: "Mesure les vrais FPS et frametimes sans rien injecter dans le jeu (source officielle Intel, via ETW).",
+    why: "C'est la base de l'analyse d'écart FPS, du 1 % low et de la courbe de frametime du cockpit.",
+  },
+  {
+    id: "capframex", name: "CapFrameX", category: "Benchmark", core: false,
+    purpose: "Capture et compare des sessions FPS/frametimes détaillées, avec 1 % / 0.1 % low et export.",
+    why: "Idéal pour valider un réglage sur plusieurs runs — un cran au-dessus de la mesure ponctuelle.",
+  },
+  {
+    id: "latencymon", name: "LatencyMon", category: "Latence", core: false,
+    purpose: "Mesure la latence DPC/ISR des pilotes — le coupable typique des micro-freezes et coupures audio.",
+    why: "Quand le jeu saccade sans que CPU/GPU ne saturent, c'est souvent un pilote : cet outil le pointe.",
+  },
+  {
+    id: "hwinfo", name: "HWiNFO", category: "Capteurs", core: false,
+    purpose: "Lit finement tous les capteurs : températures, tensions, horloges, états de throttling.",
+    why: "Complète l'analyse thermique du Moniteur avec des capteurs par cœur et par rail d'alimentation.",
+  },
+  {
+    id: "gpuz", name: "GPU-Z", category: "Infos GPU", core: false,
+    purpose: "Détaille le GPU : modèle exact, VRAM, BIOS, état du lien PCIe, capteurs.",
+    why: "Utile pour vérifier que le GPU tourne au bon régime PCIe et n'est pas bridé.",
+  },
+  {
+    id: "ddu", name: "DDU (Display Driver Uninstaller)", category: "Pilotes", core: false,
+    purpose: "Désinstalle proprement et complètement un pilote GPU avant réinstallation.",
+    why: "La solution de référence contre les crashes et TDR qui apparaissent après une mise à jour de pilote.",
+  },
+];
+
 function viewTools() {
   const t = state.tools;
-  let pmCard;
-  if (!t) {
-    pmCard = `<div class="card"><div style="font-size:16px;font-weight:600;margin-bottom:14px">PresentMon</div><div class="empty"><span class="spinner-sm"></span> Vérification…</div></div>`;
-  } else {
-    const pm = t.presentMon;
-    const statusStyle = (color, txt) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;font-family:var(--mono);font-size:11px;background:color-mix(in srgb, ${color} 14%, transparent);color:${color}">${txt}</span>`;
-    let inner;
-    if (pm.installed) {
-      inner = `<div style="display:flex;align-items:center;gap:10px;color:${C.good};font-size:13.5px;font-family:var(--mono)"><span style="width:8px;height:8px;border-radius:50%;background:${C.good}"></span>installé · ${esc(pm.path)}</div>`;
-    } else if (!t.platform.isWindows) {
-      inner = `<div style="color:#8b97a8;font-size:13.5px">PresentMon est un outil Windows (mesure des FPS réels). Indisponible sur cette plateforme.</div>`;
+  const lead = `<p class="lead">Chaque outil est décrit ici — à quoi il sert et pourquoi il peut aider — <strong style="color:#c3ccd8">avant</strong> toute installation. Seul PresentMon est intégré pour l'instant ; les autres arrivent à ta demande, avec ton feu vert sur l'installation.</p>`;
+  const badge2 = (color, txt) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;font-family:var(--mono);font-size:11px;background:color-mix(in srgb, ${color} 14%, transparent);color:${color}">${txt}</span>`;
+
+  const cards = TOOLS_CATALOG.map((tool) => {
+    let status, action = "";
+    if (tool.id === "presentmon") {
+      if (!t) { status = badge2(C.faint, "vérification…"); }
+      else if (t.presentMon.installed) {
+        status = badge2(C.good, "installé");
+        action = `<div style="display:flex;align-items:center;gap:10px;color:${C.good};font-size:12.5px;font-family:var(--mono);margin-top:14px"><span style="width:8px;height:8px;border-radius:50%;background:${C.good}"></span>${esc(t.presentMon.path || "")}</div>`;
+      } else if (!t.platform.isWindows) {
+        status = badge2(C.warn, "Windows uniquement");
+      } else {
+        status = badge2(C.warn, "non installé");
+        action = `<div style="margin-top:14px"><button class="btn-primary" data-action="install-pm" id="install-pm">Télécharger et installer</button></div>`;
+      }
     } else {
-      inner = `<button class="btn-primary" data-action="install-pm" id="install-pm">Télécharger et installer</button>`;
+      status = badge2(C.faint, "intégration à venir");
+      action = `<div style="margin-top:14px;font-family:var(--mono);font-size:11.5px;color:#5e6a7b">Décris ton besoin — je peux l'intégrer aux analyses.</div>`;
     }
-    pmCard = `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:16px;font-weight:600">PresentMon</span>${statusStyle(pm.installed ? C.good : C.warn, pm.installed ? "installé" : "non installé")}</div>
-      <p style="margin:0 0 18px;font-size:13.5px;color:#8b97a8;line-height:1.6">Mesure les vrais FPS sans injection, depuis la source officielle Intel. Nécessaire pour l'analyse d'écart FPS et la courbe de frametime.</p>
-      ${inner}
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+        <span style="font-size:16px;font-weight:600">${esc(tool.name)}</span>${status}
+      </div>
+      <span style="display:inline-flex;padding:3px 9px;border-radius:6px;font-family:var(--mono);font-size:10px;background:#1b222d;color:#8b97a8;margin-bottom:12px">${esc(tool.category)}</span>
+      <p style="margin:0 0 8px;font-size:13.5px;color:#c3ccd8;line-height:1.55">${esc(tool.purpose)}</p>
+      <p style="margin:0;font-size:12.5px;color:#8b97a8;line-height:1.5"><span style="color:${C.accentSoft}">Pourquoi :</span> ${esc(tool.why)}</p>
+      ${action}
     </div>`;
-  }
+  }).join("");
+
   const backupsCard = `<div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:16px;font-weight:600">Sauvegardes de config</span><span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;font-family:var(--mono);font-size:11px;background:color-mix(in srgb, ${C.good} 14%, transparent);color:${C.good}"><span style="width:6px;height:6px;border-radius:50%;background:${C.good}"></span>actif</span></div>
-    <p style="margin:0 0 18px;font-size:13.5px;color:#8b97a8;line-height:1.6">Chaque modification est précédée d'une sauvegarde horodatée. La restauration est chirurgicale : seule la clé testée revient à sa valeur d'origine. Restaure depuis le panneau « Appliquer » de l'analyse.</p>
-    <div style="font-family:var(--mono);font-size:12px;color:#5e6a7b;line-height:1.7">Les sauvegardes sont créées automatiquement au moment d'appliquer un réglage.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:16px;font-weight:600">Sauvegardes de config</span>${badge2(C.good, "actif")}</div>
+    <p style="margin:0;font-size:13.5px;color:#8b97a8;line-height:1.6">Chaque modification de config est précédée d'une sauvegarde horodatée. La restauration est chirurgicale : seule la clé testée revient à sa valeur d'origine. Restaure depuis le panneau « Appliquer » de l'analyse.</p>
   </div>`;
-  return `<div class="view">${head("06 — Outils", "Mesure & sauvegardes")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${pmCard}${backupsCard}</div></div>`;
+
+  return `<div class="view">${head("09 — Outils", "Boîte à outils & sauvegardes")}${lead}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${cards}</div>
+    ${backupsCard}
+  </div>`;
 }
 
 // ============================================================================
@@ -594,18 +646,31 @@ function procRow(u, mode) {
 function viewMoniteur() {
   const live = state.live;
   const kicker = "03 — Analyse continue";
-  const right = `<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:${live ? C.good : "#5e6a7b"}"><span class="dot ${live ? "dot-good pulse" : ""}" style="width:8px;height:8px;${live ? "" : "background:#5e6a7b"}"></span>${live ? "en direct" : "démarrage…"}</div>`;
-  const lead = `<p class="lead">Perfoptimize échantillonne le PC en continu et attribue les ressources — pour voir en direct ce qui se dispute le CPU et la RAM avec ton jeu, et repérer un processus parasite avant qu'il ne provoque un freeze.</p>`;
+  const updated = live && live.timestamp ? new Date(live.timestamp).toLocaleTimeString("fr-FR") : null;
+  const right = `<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:${live ? C.good : "#5e6a7b"}"><span class="dot ${live ? "dot-good pulse" : ""}" style="width:8px;height:8px;${live ? "" : "background:#5e6a7b"}"></span>${live ? `en direct${updated ? " · maj " + updated : ""}` : "démarrage…"}</div>`;
+  const lead = `<p class="lead">Perfoptimize échantillonne le PC en continu (toutes les 2 s) et attribue les ressources — pour voir en direct la charge CPU/GPU/RAM, les températures, et ce qui se dispute la machine avec ton jeu avant que ça ne provoque un freeze.</p>`;
 
   if (!live) {
     return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Démarrage du moniteur…</div></div>`;
   }
 
-  const cpuGauge = gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true);
-  const ramGauge = live.ramUsedPercent != null
+  const gauges = [];
+  gauges.push(gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true));
+  if (live.gpuPercent != null)
+    gauges.push(gauge({ label: "GPU", value: pct(live.gpuPercent), ringValue: live.gpuPercent, unit: "%", sub: live.vramPercent != null ? `VRAM ${pct(live.vramPercent)} %` : "", color: usageColor(live.gpuPercent) }, true));
+  gauges.push(live.ramUsedPercent != null
     ? gauge({ label: "RAM", value: pct(live.ramUsedPercent), ringValue: live.ramUsedPercent, unit: "%", sub: `${gib(live.ramUsedBytes) || "?"} / ${gib(live.ramTotalBytes) || "?"}`, color: vramColor(live.ramUsedPercent) }, true)
-    : `<div class="card gauge" style="flex:1 1 168px;max-width:360px;padding:20px;justify-content:center"><div class="empty" style="border:none;background:none;padding:0;text-align:center">RAM système<br>non disponible</div></div>`;
-  const sessionCard = `<div class="card" style="flex:1 1 260px;display:flex;flex-direction:column;justify-content:center;gap:10px">
+    : `<div class="card gauge" style="flex:1 1 168px;max-width:360px;padding:20px;justify-content:center"><div class="empty" style="border:none;background:none;padding:0;text-align:center">RAM système<br>non disponible</div></div>`);
+  if (live.cpuTemperatureC != null)
+    gauges.push(gauge({ label: "Temp CPU", value: Math.round(live.cpuTemperatureC), ringValue: live.cpuTemperatureC, unit: "°", sub: "", color: cpuTempColor(live.cpuTemperatureC) }, true));
+  if (live.gpuTemperatureC != null)
+    gauges.push(gauge({ label: "Temp GPU", value: Math.round(live.gpuTemperatureC), ringValue: live.gpuTemperatureC, unit: "°", sub: live.gpuThrottling ? "throttling" : "", color: live.gpuThrottling ? C.bad : tempColor(live.gpuTemperatureC) }, true));
+
+  const noTemp = live.cpuTemperatureC == null && live.gpuTemperatureC == null;
+  const tempNote = noTemp
+    ? `<div class="empty">Températures indisponibles : aucun capteur lisible sans droits administrateur ou pilote adéquat (fréquent hors Windows/sans GPU NVIDIA). Ce n'est pas « 0 °C », c'est « capteur absent ».</div>`
+    : "";
+  const sessionCard = `<div class="card" style="display:flex;flex-direction:column;justify-content:center;gap:10px">
     ${cardHead(live.game ? "Jeu en session" : "Aucun jeu détecté", live.game ? C.good : C.faint)}
     <div style="font-size:20px;font-weight:700">${live.game ? esc(live.game) : "En veille"}</div>
     <div style="font-family:var(--mono);font-size:11px;color:#5e6a7b">${live.game ? `pid ${live.gamePid} · ressources surveillées en direct` : "Lance un jeu : le moniteur attribuera automatiquement les ressources."}</div>
@@ -628,12 +693,57 @@ function viewMoniteur() {
   </div>`;
 
   return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}
-    <div style="display:flex;flex-wrap:wrap;gap:16px">${cpuGauge}${ramGauge}${sessionCard}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px">${gauges.join("")}</div>
+    ${tempNote}
+    ${sessionCard}
     ${alertsBlock}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       ${table("Top CPU", live.topByCpu || [], "cpu")}
       ${table("Top mémoire", live.topByMemory || [], "mem")}
     </div>
+  </div>`;
+}
+
+// ============================================================================
+//  VIEW: Réseau
+// ============================================================================
+const WELL_KNOWN_PORTS = { 80: "HTTP", 443: "HTTPS", 53: "DNS", 3389: "RDP", 445: "SMB", 22: "SSH", 3074: "Xbox", 27015: "Steam", 5222: "chat" };
+function viewReseau() {
+  const n = state.network;
+  const right = `<button class="btn" data-action="rescan-network">Rescanner</button>`;
+  const lead = `<p class="lead">Inventaire en lecture seule de l'activité TCP : les connexions établies (ce qui communique vers l'extérieur) et les ports ouverts en écoute. Utile pour repérer ce qui consomme la bande passante pendant le jeu ou un port inattendu. L'attribution par processus arrivera ensuite.</p>`;
+  if (n === null) {
+    return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture des connexions réseau…</div></div>`;
+  }
+  const statCard = (val, label, color) => `<div class="card" style="flex:1 1 200px">
+    <div style="font-family:var(--mono);font-size:34px;font-weight:700;color:${color}">${val}</div>
+    <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a8;margin-top:6px">${label}</div>
+  </div>`;
+
+  const remotes = (n.topRemotes || []);
+  const remoteRows = remotes.length
+    ? remotes.map((r) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #1b222d">
+        <span style="font-family:var(--mono);font-size:13px;color:#c3ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.address)}</span>
+        <span style="font-family:var(--mono);font-size:12px;color:#8b97a8;flex:none">${r.connections} conn.</span>
+      </div>`).join("")
+    : `<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucune connexion externe établie.</div>`;
+
+  const ports = (n.listeningPorts || []);
+  const portChips = ports.length
+    ? ports.map((p) => {
+        const lbl = WELL_KNOWN_PORTS[p];
+        return `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:6px;background:#0e131b;border:1px solid #1b222d;font-family:var(--mono);font-size:12px;color:#c3ccd8;margin:0 7px 7px 0">${p}${lbl ? `<span style="color:#5e6a7b">${lbl}</span>` : ""}</span>`;
+      }).join("")
+    : `<div style="font-size:13px;color:#5e6a7b">Aucun port en écoute détecté.</div>`;
+
+  return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}
+    <div style="display:flex;flex-wrap:wrap;gap:16px">
+      ${statCard(n.establishedCount, "Connexions établies", C.accentSoft)}
+      ${statCard(n.listeningCount, "Ports en écoute", C.warn)}
+    </div>
+    <div class="card">${cardHead("Connexions sortantes")}<div style="margin-top:2px">${remoteRows}</div></div>
+    <div class="card">${cardHead("Ports en écoute", C.warn)}<div style="margin-top:2px">${portChips}</div></div>
+    <div class="empty">Un port en écoute n'est pas un problème en soi (jeux, services Windows, launchers en ouvrent). Ce panneau sert à repérer l'inhabituel, pas à alarmer.</div>
   </div>`;
 }
 
@@ -658,14 +768,14 @@ function incidentWhen(iso) {
 function viewIncidents() {
   const lead = `<p class="lead">Post-mortem en lecture seule : Perfoptimize lit l'historique d'événements de Windows (14 derniers jours) et explique chaque incident — crash, écran bleu, plantage GPU, arrêt inattendu — avec sa cause probable et une solution. Rien n'est modifié.</p>`;
   if (state.incidents === null) {
-    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
+    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
   }
   if (!state.incidents.supported) {
-    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
+    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
   }
   const list = state.incidents.incidents || [];
   if (!list.length) {
-    return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
+    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
   }
 
   // summary chips by kind
@@ -700,7 +810,7 @@ function viewIncidents() {
     </div>`;
   }).join("");
 
-  return `<div class="view">${head("06 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
+  return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
     <div style="display:flex;flex-wrap:wrap;gap:10px">${summary}</div>
     <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>
   </div>`;
@@ -709,7 +819,7 @@ function viewIncidents() {
 // ============================================================================
 //  Render + navigation
 // ============================================================================
-const VIEWS = { overview: viewOverview, analyse: viewAnalyse, moniteur: viewMoniteur, library: viewLibrary, hardware: viewHardware, system: viewSystem, incidents: viewIncidents, tools: viewTools };
+const VIEWS = { overview: viewOverview, analyse: viewAnalyse, moniteur: viewMoniteur, library: viewLibrary, hardware: viewHardware, system: viewSystem, incidents: viewIncidents, reseau: viewReseau, tools: viewTools };
 
 function render() {
   // nav
@@ -756,6 +866,7 @@ function setView(v) {
   if (v === "system" && state.system === null) loadSystem();
   if (v === "hardware" && !state.hardware) loadHardware();
   if (v === "incidents" && state.incidents === null) loadIncidents();
+  if (v === "reseau" && state.network === null) loadNetwork();
   if (v === "tools" && !state.tools) loadTools();
   render();
   window.scrollTo(0, 0); // a fresh view starts at the top, under the sticky topbar
@@ -839,6 +950,12 @@ async function loadIncidents() {
   try { state.incidents = await getJson("/api/incidents"); }
   catch { state.incidents = { supported: false, incidents: [] }; }
   if (state.view === "incidents") render();
+}
+
+async function loadNetwork() {
+  try { state.network = await getJson("/api/network"); }
+  catch { state.network = { establishedCount: 0, listeningCount: 0, topRemotes: [], listeningPorts: [] }; }
+  if (state.view === "reseau") render();
 }
 
 // ---- Live monitor (continuous polling) -------------------------------------
@@ -978,6 +1095,7 @@ $("content").addEventListener("click", (e) => {
     case "restore": doRestore(); break;
     case "install-pm": installPresentMon(); break;
     case "rescan-library": state.library = null; state.libConfigs = {}; state.openConfig = null; render(); loadLibrary(); break;
+    case "rescan-network": state.network = null; render(); loadNetwork(); break;
     case "toggle-config": {
       const idx = parseInt(a.dataset.idx, 10);
       if (state.openConfig === idx) { state.openConfig = null; render(); }
