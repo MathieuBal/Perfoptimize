@@ -18,7 +18,7 @@ public sealed class ProcessUsage
     public bool IsGame { get; init; }
 }
 
-public enum LiveAlertKind { ProcessHog, CpuContention, MemoryPressure }
+public enum LiveAlertKind { ProcessHog, CpuContention, MemoryPressure, Thermal }
 
 /// <summary>A live attribution: something is competing with the game right now.</summary>
 public sealed class LiveAlert
@@ -42,6 +42,12 @@ public sealed class LiveSnapshot
     public long? RamUsedBytes { get; init; }
     public long? RamTotalBytes { get; init; }
     public double? RamUsedPercent { get; init; }
+    public double? GpuPercent { get; init; }
+    public double? VramPercent { get; init; }
+    public double? CpuTemperatureC { get; init; }
+    public double? GpuTemperatureC { get; init; }
+    /// <summary>True when the GPU is thermal-throttling (clocks cut to shed heat).</summary>
+    public bool? GpuThrottling { get; init; }
     public int ProcessCount { get; init; }
     public string? GameName { get; init; }
     public int? GamePid { get; init; }

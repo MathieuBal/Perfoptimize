@@ -73,6 +73,7 @@ async function postJson(url, body) {
 function usageColor(v) { if (v == null) return C.faint; if (v >= 90) return C.bad; if (v >= 75) return C.warn; return C.good; }
 function vramColor(v) { if (v == null) return C.faint; if (v >= 88) return C.bad; if (v >= 70) return C.warn; return C.good; }
 function tempColor(v) { if (v == null) return C.faint; if (v >= 85) return C.bad; if (v >= 75) return C.warn; return C.good; }
+function cpuTempColor(v) { if (v == null) return C.faint; if (v >= 90) return C.bad; if (v >= 80) return C.warn; return C.good; }
 
 // ---- small view builders ---------------------------------------------------
 function ring(v, c) {
@@ -541,34 +542,84 @@ function viewSystem() {
 // ============================================================================
 //  VIEW: 06 — Outils
 // ============================================================================
+// Catalogue d'outils : décrits d'abord, installés/intégrés ensuite. Seul
+// PresentMon est câblé aujourd'hui ; les autres sont documentés pour que tu
+// saches à quoi ils servent avant de décider.
+const TOOLS_CATALOG = [
+  {
+    id: "presentmon", name: "PresentMon", category: "Mesure FPS", core: true,
+    purpose: "Mesure les vrais FPS et frametimes sans rien injecter dans le jeu (source officielle Intel, via ETW).",
+    why: "C'est la base de l'analyse d'écart FPS, du 1 % low et de la courbe de frametime du cockpit.",
+  },
+  {
+    id: "capframex", name: "CapFrameX", category: "Benchmark", core: false,
+    purpose: "Capture et compare des sessions FPS/frametimes détaillées, avec 1 % / 0.1 % low et export.",
+    why: "Idéal pour valider un réglage sur plusieurs runs — un cran au-dessus de la mesure ponctuelle.",
+  },
+  {
+    id: "latencymon", name: "LatencyMon", category: "Latence", core: false,
+    purpose: "Mesure la latence DPC/ISR des pilotes — le coupable typique des micro-freezes et coupures audio.",
+    why: "Quand le jeu saccade sans que CPU/GPU ne saturent, c'est souvent un pilote : cet outil le pointe.",
+  },
+  {
+    id: "hwinfo", name: "HWiNFO", category: "Capteurs", core: false,
+    purpose: "Lit finement tous les capteurs : températures, tensions, horloges, états de throttling.",
+    why: "Complète l'analyse thermique du Moniteur avec des capteurs par cœur et par rail d'alimentation.",
+  },
+  {
+    id: "gpuz", name: "GPU-Z", category: "Infos GPU", core: false,
+    purpose: "Détaille le GPU : modèle exact, VRAM, BIOS, état du lien PCIe, capteurs.",
+    why: "Utile pour vérifier que le GPU tourne au bon régime PCIe et n'est pas bridé.",
+  },
+  {
+    id: "ddu", name: "DDU (Display Driver Uninstaller)", category: "Pilotes", core: false,
+    purpose: "Désinstalle proprement et complètement un pilote GPU avant réinstallation.",
+    why: "La solution de référence contre les crashes et TDR qui apparaissent après une mise à jour de pilote.",
+  },
+];
+
 function viewTools() {
   const t = state.tools;
-  let pmCard;
-  if (!t) {
-    pmCard = `<div class="card"><div style="font-size:16px;font-weight:600;margin-bottom:14px">PresentMon</div><div class="empty"><span class="spinner-sm"></span> Vérification…</div></div>`;
-  } else {
-    const pm = t.presentMon;
-    const statusStyle = (color, txt) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;font-family:var(--mono);font-size:11px;background:color-mix(in srgb, ${color} 14%, transparent);color:${color}">${txt}</span>`;
-    let inner;
-    if (pm.installed) {
-      inner = `<div style="display:flex;align-items:center;gap:10px;color:${C.good};font-size:13.5px;font-family:var(--mono)"><span style="width:8px;height:8px;border-radius:50%;background:${C.good}"></span>installé · ${esc(pm.path)}</div>`;
-    } else if (!t.platform.isWindows) {
-      inner = `<div style="color:#8b97a8;font-size:13.5px">PresentMon est un outil Windows (mesure des FPS réels). Indisponible sur cette plateforme.</div>`;
+  const lead = `<p class="lead">Chaque outil est décrit ici — à quoi il sert et pourquoi il peut aider — <strong style="color:#c3ccd8">avant</strong> toute installation. Seul PresentMon est intégré pour l'instant ; les autres arrivent à ta demande, avec ton feu vert sur l'installation.</p>`;
+  const badge2 = (color, txt) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;font-family:var(--mono);font-size:11px;background:color-mix(in srgb, ${color} 14%, transparent);color:${color}">${txt}</span>`;
+
+  const cards = TOOLS_CATALOG.map((tool) => {
+    let status, action = "";
+    if (tool.id === "presentmon") {
+      if (!t) { status = badge2(C.faint, "vérification…"); }
+      else if (t.presentMon.installed) {
+        status = badge2(C.good, "installé");
+        action = `<div style="display:flex;align-items:center;gap:10px;color:${C.good};font-size:12.5px;font-family:var(--mono);margin-top:14px"><span style="width:8px;height:8px;border-radius:50%;background:${C.good}"></span>${esc(t.presentMon.path || "")}</div>`;
+      } else if (!t.platform.isWindows) {
+        status = badge2(C.warn, "Windows uniquement");
+      } else {
+        status = badge2(C.warn, "non installé");
+        action = `<div style="margin-top:14px"><button class="btn-primary" data-action="install-pm" id="install-pm">Télécharger et installer</button></div>`;
+      }
     } else {
-      inner = `<button class="btn-primary" data-action="install-pm" id="install-pm">Télécharger et installer</button>`;
+      status = badge2(C.faint, "intégration à venir");
+      action = `<div style="margin-top:14px;font-family:var(--mono);font-size:11.5px;color:#5e6a7b">Décris ton besoin — je peux l'intégrer aux analyses.</div>`;
     }
-    pmCard = `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:16px;font-weight:600">PresentMon</span>${statusStyle(pm.installed ? C.good : C.warn, pm.installed ? "installé" : "non installé")}</div>
-      <p style="margin:0 0 18px;font-size:13.5px;color:#8b97a8;line-height:1.6">Mesure les vrais FPS sans injection, depuis la source officielle Intel. Nécessaire pour l'analyse d'écart FPS et la courbe de frametime.</p>
-      ${inner}
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+        <span style="font-size:16px;font-weight:600">${esc(tool.name)}</span>${status}
+      </div>
+      <span style="display:inline-flex;padding:3px 9px;border-radius:6px;font-family:var(--mono);font-size:10px;background:#1b222d;color:#8b97a8;margin-bottom:12px">${esc(tool.category)}</span>
+      <p style="margin:0 0 8px;font-size:13.5px;color:#c3ccd8;line-height:1.55">${esc(tool.purpose)}</p>
+      <p style="margin:0;font-size:12.5px;color:#8b97a8;line-height:1.5"><span style="color:${C.accentSoft}">Pourquoi :</span> ${esc(tool.why)}</p>
+      ${action}
     </div>`;
-  }
+  }).join("");
+
   const backupsCard = `<div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:16px;font-weight:600">Sauvegardes de config</span><span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:8px;font-family:var(--mono);font-size:11px;background:color-mix(in srgb, ${C.good} 14%, transparent);color:${C.good}"><span style="width:6px;height:6px;border-radius:50%;background:${C.good}"></span>actif</span></div>
-    <p style="margin:0 0 18px;font-size:13.5px;color:#8b97a8;line-height:1.6">Chaque modification est précédée d'une sauvegarde horodatée. La restauration est chirurgicale : seule la clé testée revient à sa valeur d'origine. Restaure depuis le panneau « Appliquer » de l'analyse.</p>
-    <div style="font-family:var(--mono);font-size:12px;color:#5e6a7b;line-height:1.7">Les sauvegardes sont créées automatiquement au moment d'appliquer un réglage.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:16px;font-weight:600">Sauvegardes de config</span>${badge2(C.good, "actif")}</div>
+    <p style="margin:0;font-size:13.5px;color:#8b97a8;line-height:1.6">Chaque modification de config est précédée d'une sauvegarde horodatée. La restauration est chirurgicale : seule la clé testée revient à sa valeur d'origine. Restaure depuis le panneau « Appliquer » de l'analyse.</p>
   </div>`;
-  return `<div class="view">${head("09 — Outils", "Mesure & sauvegardes")}<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${pmCard}${backupsCard}</div></div>`;
+
+  return `<div class="view">${head("09 — Outils", "Boîte à outils & sauvegardes")}${lead}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${cards}</div>
+    ${backupsCard}
+  </div>`;
 }
 
 // ============================================================================
@@ -595,18 +646,31 @@ function procRow(u, mode) {
 function viewMoniteur() {
   const live = state.live;
   const kicker = "03 — Analyse continue";
-  const right = `<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:${live ? C.good : "#5e6a7b"}"><span class="dot ${live ? "dot-good pulse" : ""}" style="width:8px;height:8px;${live ? "" : "background:#5e6a7b"}"></span>${live ? "en direct" : "démarrage…"}</div>`;
-  const lead = `<p class="lead">Perfoptimize échantillonne le PC en continu et attribue les ressources — pour voir en direct ce qui se dispute le CPU et la RAM avec ton jeu, et repérer un processus parasite avant qu'il ne provoque un freeze.</p>`;
+  const updated = live && live.timestamp ? new Date(live.timestamp).toLocaleTimeString("fr-FR") : null;
+  const right = `<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:${live ? C.good : "#5e6a7b"}"><span class="dot ${live ? "dot-good pulse" : ""}" style="width:8px;height:8px;${live ? "" : "background:#5e6a7b"}"></span>${live ? `en direct${updated ? " · maj " + updated : ""}` : "démarrage…"}</div>`;
+  const lead = `<p class="lead">Perfoptimize échantillonne le PC en continu (toutes les 2 s) et attribue les ressources — pour voir en direct la charge CPU/GPU/RAM, les températures, et ce qui se dispute la machine avec ton jeu avant que ça ne provoque un freeze.</p>`;
 
   if (!live) {
     return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Démarrage du moniteur…</div></div>`;
   }
 
-  const cpuGauge = gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true);
-  const ramGauge = live.ramUsedPercent != null
+  const gauges = [];
+  gauges.push(gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true));
+  if (live.gpuPercent != null)
+    gauges.push(gauge({ label: "GPU", value: pct(live.gpuPercent), ringValue: live.gpuPercent, unit: "%", sub: live.vramPercent != null ? `VRAM ${pct(live.vramPercent)} %` : "", color: usageColor(live.gpuPercent) }, true));
+  gauges.push(live.ramUsedPercent != null
     ? gauge({ label: "RAM", value: pct(live.ramUsedPercent), ringValue: live.ramUsedPercent, unit: "%", sub: `${gib(live.ramUsedBytes) || "?"} / ${gib(live.ramTotalBytes) || "?"}`, color: vramColor(live.ramUsedPercent) }, true)
-    : `<div class="card gauge" style="flex:1 1 168px;max-width:360px;padding:20px;justify-content:center"><div class="empty" style="border:none;background:none;padding:0;text-align:center">RAM système<br>non disponible</div></div>`;
-  const sessionCard = `<div class="card" style="flex:1 1 260px;display:flex;flex-direction:column;justify-content:center;gap:10px">
+    : `<div class="card gauge" style="flex:1 1 168px;max-width:360px;padding:20px;justify-content:center"><div class="empty" style="border:none;background:none;padding:0;text-align:center">RAM système<br>non disponible</div></div>`);
+  if (live.cpuTemperatureC != null)
+    gauges.push(gauge({ label: "Temp CPU", value: Math.round(live.cpuTemperatureC), ringValue: live.cpuTemperatureC, unit: "°", sub: "", color: cpuTempColor(live.cpuTemperatureC) }, true));
+  if (live.gpuTemperatureC != null)
+    gauges.push(gauge({ label: "Temp GPU", value: Math.round(live.gpuTemperatureC), ringValue: live.gpuTemperatureC, unit: "°", sub: live.gpuThrottling ? "throttling" : "", color: live.gpuThrottling ? C.bad : tempColor(live.gpuTemperatureC) }, true));
+
+  const noTemp = live.cpuTemperatureC == null && live.gpuTemperatureC == null;
+  const tempNote = noTemp
+    ? `<div class="empty">Températures indisponibles : aucun capteur lisible sans droits administrateur ou pilote adéquat (fréquent hors Windows/sans GPU NVIDIA). Ce n'est pas « 0 °C », c'est « capteur absent ».</div>`
+    : "";
+  const sessionCard = `<div class="card" style="display:flex;flex-direction:column;justify-content:center;gap:10px">
     ${cardHead(live.game ? "Jeu en session" : "Aucun jeu détecté", live.game ? C.good : C.faint)}
     <div style="font-size:20px;font-weight:700">${live.game ? esc(live.game) : "En veille"}</div>
     <div style="font-family:var(--mono);font-size:11px;color:#5e6a7b">${live.game ? `pid ${live.gamePid} · ressources surveillées en direct` : "Lance un jeu : le moniteur attribuera automatiquement les ressources."}</div>
@@ -629,7 +693,9 @@ function viewMoniteur() {
   </div>`;
 
   return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}
-    <div style="display:flex;flex-wrap:wrap;gap:16px">${cpuGauge}${ramGauge}${sessionCard}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px">${gauges.join("")}</div>
+    ${tempNote}
+    ${sessionCard}
     ${alertsBlock}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       ${table("Top CPU", live.topByCpu || [], "cpu")}
