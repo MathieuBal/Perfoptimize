@@ -1,0 +1,21 @@
+{
+  "name": "Apex Legends",
+  "executables": ["r5apex.exe", "r5apex_dx12.exe"],
+  "upscalers": [],
+  "advisories": [
+    {
+      "setting": "Ombres du soleil (Sun Shadow) élevé/très élevé",
+      "kind": "poorValue",
+      "recommendation": "Baisser à Moyen",
+      "detail": "Les ombres du soleil en élevé coûtent beaucoup de FPS pour peu de gain visuel en jeu rapide. Moyen est le meilleur compromis compétitif.",
+      "evidence": "communityValidated"
+    }
+  ],
+  "settings": [
+    { "name": "Sun Shadow Detail", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 10 },
+    { "name": "Spot Shadow Detail", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 6 },
+    { "name": "Model Detail", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 5 },
+    { "name": "Volumetric Lighting", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 5 },
+    { "name": "Effects Detail", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 5 }
+  ]
+}

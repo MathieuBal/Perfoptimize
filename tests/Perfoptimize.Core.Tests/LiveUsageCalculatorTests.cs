@@ -99,6 +99,33 @@ public class LiveUsageCalculatorTests
     }
 
     [Fact]
+    public void High_dpc_time_raises_a_driver_latency_alert()
+    {
+        var reading = new[] { P(1, "game", 0, GiB) };
+
+        var snap = LiveUsageCalculator.Compute(
+            reading, reading, TimeSpan.FromMilliseconds(1000), cpuCount: 4,
+            ramTotalBytes: null, ramUsedBytes: null, gamePid: 1, gameName: "game",
+            dpcPercent: 12, interruptPercent: 2);
+
+        Assert.Equal(12, snap.DpcPercent);
+        Assert.Contains(snap.Alerts, a => a.Kind == LiveAlertKind.DriverLatency);
+    }
+
+    [Fact]
+    public void Low_dpc_time_raises_no_driver_latency_alert()
+    {
+        var reading = new[] { P(1, "game", 0, GiB) };
+
+        var snap = LiveUsageCalculator.Compute(
+            reading, reading, TimeSpan.FromMilliseconds(1000), cpuCount: 4,
+            ramTotalBytes: null, ramUsedBytes: null, gamePid: 1, gameName: "game",
+            dpcPercent: 2, interruptPercent: 1);
+
+        Assert.DoesNotContain(snap.Alerts, a => a.Kind == LiveAlertKind.DriverLatency);
+    }
+
+    [Fact]
     public void Cool_temperatures_raise_no_thermal_alert()
     {
         var reading = new[] { P(1, "game", 0, GiB) };

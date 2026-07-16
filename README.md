@@ -1,8 +1,11 @@
 # Perfoptimize
 
-Assistant d'optimisation de jeux : détection du matériel, observation des
-performances en jeu, identification du composant limitant et recommandations
-de réglages graphiques.
+Assistant d'optimisation de jeux et de surveillance du PC : détection du
+matériel, mesure des performances en jeu (FPS réels, goulot d'étranglement),
+recommandations et application des réglages graphiques — plus un **cockpit
+sombre** avec analyse continue temps réel (CPU/GPU/RAM/températures/latence
+pilote), diagnostic des crashs et freezes, analyse réseau, et un guide qui
+explique ce que change chaque réglage. Moteur partagé entre la CLI et l'UI.
 
 ## État du projet
 
@@ -30,6 +33,22 @@ de réglages graphiques.
   Steam, localisation et lecture générique des fichiers de configuration, sans profil requis)
 - ✅ **Étape 17 — scan multi-disques, Epic, et réglages à éviter** (toutes les bibliothèques Steam
   de tous les disques + Epic Games ; base de connaissances communautaire des réglages problématiques)
+- ✅ **Étape 18 — refonte cockpit** (interface sombre instrumentée à 9 sections en SPA vanilla,
+  jauges circulaires, courbe de frametime réelle ; remplace les deux onglets Jeux / Système)
+- ✅ **Étape 19 — analyse continue en arrière-plan** (service `BackgroundService` qui échantillonne
+  la machine en permanence côté serveur, indépendamment de la vue affichée)
+- ✅ **Étape 20 — moniteur temps réel** (CPU/GPU/RAM + **températures** + **latence DPC/ISR** en
+  direct, attribution des ressources par processus vis-à-vis du jeu)
+- ✅ **Étape 21 — alertes & notifications** (suivi d'alertes avec identités stables, pastille
+  globale, notifications navigateur : surchauffe, processus parasite, latence pilote)
+- ✅ **Étape 22 — diagnostic d'incidents** (lecture du journal d'événements Windows : crash appli,
+  écran bleu, plantage GPU/TDR, arrêt inattendu, mémoire, disque — avec cause + solution)
+- ✅ **Étape 23 — analyse réseau** (inventaire TCP + **attribution des connexions au programme**
+  qui les ouvre, résolution des noms, niveau de confiance, guide « normal vs suspect »)
+- ✅ **Étape 24 — guide des réglages** (explication en clair de chaque réglage + choix
+  **DirectX 11 / 12 / Vulkan** adapté au goulot mesuré)
+- ✅ **Étape 25 — FPS live + détection automatique des changements** (le moniteur mesure le FPS en
+  continu et signale de lui-même « 48 → 56 FPS (+16 %) » quand un réglage agit, sans re-mesurer)
 
 ## Réglages à éviter (connaissance communautaire)
 
@@ -99,7 +118,8 @@ est mise en avant dans l'interface.
 
 ## Détection automatique et optimisation globale
 
-L'interface est organisée en deux onglets :
+Deux piliers complémentaires — aujourd'hui répartis dans les sections du cockpit
+(Analyse/Jeux installés d'un côté, Système/Matériel de l'autre) :
 
 - **Jeux** : le jeu en cours est détecté même s'il n'a **pas de profil détaillé** —
   une heuristique reconnaît un jeu à son emplacement d'installation (dossiers
@@ -128,22 +148,104 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows-exe.ps1
 L'exécutable est produit dans **`dist\Perfoptimize.exe`**. Double-clique
 dessus : il démarre un petit serveur local et ouvre un tableau de bord dans ton
 navigateur (garde la fenêtre ouverte pendant l'utilisation ; le bouton
-« Quitter » l'arrête). L'interface permet de :
+« Quitter » l'arrête). L'interface est un **cockpit sombre à 9 sections** (SPA
+vanilla, sans framework) :
 
-- voir le **matériel détecté** (CPU, GPU, VRAM, RAM, écran) ;
-- voir le **jeu en cours** parmi les jeux reconnus ;
-- lancer une **analyse** (durée, objectif qualité/équilibré/performance, FPS
-  visés) et lire le goulot, les métriques et les recommandations ;
-- **appliquer les réglages** aux fichiers de config directement depuis
-  l'interface : aperçu (rien n'est écrit), application (jeu fermé exigé,
-  sauvegarde automatique), et restauration en un clic — avec les mêmes
-  garde-fous que la CLI (verdicts externes refusés) ;
-- **télécharger et installer PresentMon** en un clic (mesure des vrais FPS),
-  depuis la source officielle Intel (`GameTechDev/PresentMon`).
+1. **Vue d'ensemble** — jeu détecté, jauges clés, résumé matériel, dernier diagnostic ;
+2. **Analyse** — lancer une mesure (durée, objectif, FPS visés), lire le goulot,
+   les jauges, la **courbe de frametime**, les réglages à éviter, les
+   recommandations, appliquer/restaurer la config, **et comprendre les réglages**
+   (guide DirectX 11/12/Vulkan + glossaire, cf. plus bas) ;
+3. **Moniteur** — analyse continue temps réel (cf. plus bas) ;
+4. **Jeux installés** — scan multi-disques Steam/Epic + lecture des configs ;
+5. **Matériel** — CPU/GPU/RAM/écran/stockage/OS, chaque capteur nullable ;
+6. **Système** — conseiller matériel classé par gravité ;
+7. **Incidents** — d'où viennent les crashs/écrans bleus/plantages GPU (cf. plus bas) ;
+8. **Réseau** — qui parle à Internet, et est-ce normal (cf. plus bas) ;
+9. **Outils** — catalogue d'outils décrits (PresentMon installable ; CapFrameX,
+   LatencyMon, HWiNFO, GPU-Z, DDU documentés) + sauvegardes de config.
+
+Une **pastille d'alerte** dans la barre supérieure (visible depuis toutes les
+sections) et des **notifications navigateur** signalent en direct une surchauffe,
+un processus parasite, une latence pilote ou un gain/perte de FPS.
 
 La logique métier est entièrement partagée avec la CLI (projet
 `Perfoptimize.Core`) : l'interface n'est qu'une façade, le moteur est le même.
 Pour développer l'UI sans produire l'exe : `dotnet run --project src/Perfoptimize.App`.
+
+### Analyse continue en arrière-plan (le Moniteur)
+
+Un service `BackgroundService` échantillonne la machine **toutes les ~2 s côté
+serveur**, indépendamment de la section affichée : tant que l'application tourne,
+elle « comprend le PC à tout instant ». Le Moniteur affiche en direct :
+
+- **CPU système, GPU, RAM** (jauges), **températures CPU/GPU** et **latence
+  DPC/ISR** (le signal de LatencyMon : la cause classique des micro-freezes sans
+  saturation CPU/GPU) ;
+- le **top des processus** par CPU et par mémoire, avec le jeu mis en avant, et
+  une **attribution** en clair (« *chrome* consomme 34 % du CPU — il se dispute le
+  processeur avec ton jeu ») ;
+- le **FPS en direct** (via PresentMon) et surtout une **détection automatique de
+  changement** : quand tu modifies un réglage dans le jeu, le moniteur signale de
+  lui-même « 48 → 56 FPS (+16 %) » — sans qu'aucune mesure ne soit relancée. Le
+  message est transitoire (il disparaît quand le nouveau niveau devient la norme)
+  et déclenche une notification, visible même en plein jeu.
+
+> Le FPS live et les températures dépendent de PresentMon / des capteurs sous
+> Windows ; à défaut, l'affichage bascule sur un **état vide honnête**
+> (« capteur absent », jamais « 0 »).
+
+### Incidents : d'où viennent les crashs et freezes
+
+La section **Incidents** lit l'historique du journal d'événements Windows (14
+derniers jours) — en **lecture seule** — et explique chaque incident de
+stabilité avec sa **cause probable** et une **solution concrète** orientée jeu :
+
+- crash d'application, application figée, **plantage du pilote GPU (TDR)**,
+  **écran bleu (BSOD)**, arrêt inattendu (Kernel-Power 41), mémoire saturée,
+  erreur disque.
+
+### Réseau : qui parle à Internet, et est-ce normal ?
+
+La section **Réseau** rattache chaque connexion sortante au **programme qui
+l'ouvre** (`netstat -ano` sous Windows, `ss -tnp` sous Linux) et résout la
+destination en nom (reverse DNS) — pour distinguer le normal (navigateur,
+Discord, Steam, Windows Update) de l'inhabituel. Les connexions sont triées du
+plus suspect au plus banal (**identifié / inconnu / à vérifier** — un exécutable
+lancé depuis un dossier temporaire est signalé), avec un guide « comment savoir
+si c'est normal ». Note honnête intégrée : ce panneau aide à **voir et
+comprendre**, il ne remplace pas un antivirus/Malwarebytes pour un verdict.
+
+### Comprendre les réglages (guide DirectX 11 / 12 / Vulkan)
+
+En bas de la section **Analyse**, un guide explique **en clair ce que change
+chaque réglage** (résolution/upscaling, ray tracing, ombres, textures, LOD,
+densité de foule, occlusion ambiante, V-Sync, cap FPS, post-traitement…) — ce
+qu'il modifie à l'écran, quel composant il coûte (GPU/CPU/VRAM), et quand le
+baisser. Le choix de l'**API de rendu (DirectX 11 / 12 / Vulkan)** est expliqué
+et **recommandé selon le goulot mesuré** (CPU limité → DX12/Vulkan qui
+répartissent mieux sur les cœurs ; plantages → DX11 ; etc.).
+
+### API HTTP locale
+
+L'interface parle à un petit serveur local (loopback uniquement, port
+éphémère). Les endpoints, tous en lecture seule sauf `apply`/`restore`/`tools`/
+`shutdown` :
+
+| Endpoint | Rôle |
+|---|---|
+| `GET /api/hardware` | profil matériel |
+| `GET /api/games` | jeux connus + jeu en cours |
+| `GET /api/system` | conseils matériels (SystemAdvisor) |
+| `GET /api/library` · `GET /api/library/config` | jeux installés + lecture des configs |
+| `POST /api/monitor` | mesure (durée, objectif, FPS visés) → goulot, métriques, reco |
+| `GET /api/live` | instantané continu : CPU/GPU/RAM/temp/DPC, FPS, alertes, changement FPS |
+| `GET /api/incidents` | incidents de stabilité expliqués (Windows) |
+| `GET /api/network` | inventaire TCP + connexions attribuées par programme |
+| `GET /api/settings-guide` | guide des réglages + reco d'API selon le goulot |
+| `POST /api/apply` · `POST /api/restore` | prévisualiser/appliquer/restaurer la config |
+| `GET /api/tools` · `POST /api/tools/presentmon` | état des outils + install PresentMon |
+| `POST /api/shutdown` | arrêt propre depuis le bouton « Quitter » |
 
 ### Mettre à jour
 
@@ -445,7 +547,7 @@ Jeux fournis : Cyberpunk 2077, Elden Ring, GTA V, Path of Exile, The Witcher 3.
 
 ```text
 src/
-├── Perfoptimize.Core/          # bibliothèque (réutilisable par la future UI)
+├── Perfoptimize.Core/          # bibliothèque partagée (moteur commun CLI + UI)
 │   ├── Hardware/                   # étape 1 : profil matériel
 │   │   ├── HardwareProfile.cs      # modèles
 │   │   ├── HardwareScanner.cs      # point d'entrée, choix de la plateforme
@@ -464,21 +566,39 @@ src/
 │   │   ├── Frametimes/             # statistiques FPS + parseur CSV PresentMon
 │   │   ├── Windows/                # compteurs WMI (GPU Engine, GPU Adapter Memory)
 │   │   └── Linux/                  # /proc/stat, hwmon, nvidia-smi
-│   ├── Optimization/               # étapes 4 et 6 : analyse, objectifs, recommandations
+│   ├── Optimization/               # analyse, objectifs, recommandations, glossaire
 │   │   ├── BottleneckDetector.cs
-│   │   └── RecommendationEngine.cs
-│   ├── Configs/                    # étapes 8-9 : fichiers de config et application
-│   │   ├── IniFile.cs
-│   │   ├── ConfigPathResolver.cs
-│   │   ├── ConfigBackupService.cs
-│   │   ├── SettingsPlanner.cs      # planification pure des modifications
-│   │   └── SettingsApplier.cs      # backup + écriture
-│   ├── Storage/                    # étape 7 : historique SQLite des sessions
-│   │   └── SessionStore.cs
+│   │   ├── RecommendationEngine.cs
+│   │   ├── SystemAdvisor.cs        # conseils PC globaux
+│   │   ├── OptimizationLoop.cs     # boucle mesurée avant/après (tune)
+│   │   └── SettingsGlossary.cs     # explication des réglages + choix d'API (DX11/12/Vulkan)
+│   ├── Live/                       # analyse continue temps réel
+│   │   ├── LiveMonitor.cs          # échantillonneur (process + télémétrie + FPS)
+│   │   ├── LiveUsageCalculator.cs  # calcul pur : CPU%, top process, alertes
+│   │   ├── AlertTracker.cs         # alertes à identité stable (pur)
+│   │   ├── FpsChangeDetector.cs    # détection auto des changements de FPS (pur)
+│   │   ├── DpcLatencyReader.cs     # % DPC/ISR (Windows)
+│   │   └── SystemMemoryReader.cs
+│   ├── Diagnostics/                # incidents de stabilité
+│   │   ├── IncidentClassifier.cs   # événement → incident expliqué (pur)
+│   │   └── WindowsEventLogReader.cs
+│   ├── Network/                    # inventaire réseau + attribution
+│   │   ├── NetworkAnalyzer.cs · NetstatParser.cs · ConnectionClassifier.cs   # purs, testés
+│   │   ├── ProcessConnectionReader.cs · HostResolver.cs
+│   │   └── NetworkReader.cs
+│   ├── Library/                    # découverte des jeux installés + lecture des configs
+│   ├── Configs/                    # fichiers de config et application (backup, INI chirurgical)
+│   ├── Storage/                    # historique SQLite des sessions
+│   ├── Tools/                      # installation de PresentMon
 │   └── Formatting/
-└── Perfoptimize.Cli/           # console (scan, games, monitor, frametimes, history, config)
+├── Perfoptimize.App/           # application de bureau (serveur local + cockpit)
+│   ├── Program.cs                  # endpoints HTTP (minimal API)
+│   ├── LiveState.cs                # état partagé du moniteur (singleton)
+│   ├── LiveMonitorHostedService.cs # échantillonnage continu en arrière-plan
+│   └── WebAssets/                  # cockpit vanilla : index.html, styles.css, app.js
+└── Perfoptimize.Cli/           # console (scan, games, monitor, frametimes, history, config, tune)
 tests/
-└── Perfoptimize.Core.Tests/    # tests unitaires (parseurs, règles, heuristiques)
+└── Perfoptimize.Core.Tests/    # tests unitaires (parseurs, règles, heuristiques, détecteurs)
 ```
 
 ### Développement
@@ -507,14 +627,35 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
   seul un contenu réellement invalide en UTF-8 déclenche le repli Latin-1 ;
 - **Les gains estimés des profils sont déclaratifs** (ordres de grandeur des
   benchmarks publics), en attendant la boucle mesure → application →
-  re-mesure qui les calibrera sur la machine de l'utilisateur.
+  re-mesure qui les calibrera sur la machine de l'utilisateur ;
+- **Le runtime « cockpit » est surtout Windows** : FPS live (PresentMon),
+  températures/DPC (WMI), incidents (journal d'événements), attribution réseau
+  (`netstat -ano`) fonctionnent pleinement sous Windows ; Linux est partiel et
+  ces chemins **compilent mais restent à éprouver sur une vraie machine** ;
+- **La surveillance continue ne vit que tant que l'application est ouverte** :
+  elle est indépendante de la section affichée, mais ne survit pas à la
+  fermeture du processus (un mode service Windows / tâche planifiée reste à
+  faire) ;
+- **L'application conseille, elle n'automatise pas encore les corrections
+  système** (nettoyage, plan d'alimentation, arrêt d'un processus parasite,
+  installation d'outils au-delà de PresentMon) — hors l'écriture de config
+  qui, elle, est prévisualisée, sauvegardée et confirmée ;
+- **Interface en français uniquement**, thème sombre unique, couleur
+  porteuse d'information (rouge/vert) — internationalisation et accessibilité
+  restent à faire ;
+- **Pas encore de tests frontend / end-to-end** ni de fichier de licence.
 
 ### Prochaines étapes
 
 1. Validation sur plusieurs vraies machines Windows (compteurs GPU réels,
-   PresentMon, multi-GPU) ;
-2. Correspondance LUID → capacité VRAM par adaptateur (aujourd'hui le
-   dénominateur VRAM vient du GPU « principal » supposé) ;
-3. Écriture JSON/XML (Cyberpunk 2077, GTA V) et lecture des réglages actuels ;
-4. Détection d'écrans via les API d'affichage Windows ;
-5. Interface graphique (WPF/WinUI), après validation du diagnostic.
+   PresentMon, WMI, `netstat`, journal d'événements, multi-GPU) ;
+2. Tests d'intégration des endpoints + tests frontend (harness navigateur en CI) ;
+3. Passer de « conseille » à « agit » : corrections système actionnables
+   (nettoyage caches, TRIM, plan d'alimentation, arrêt de processus parasite),
+   toujours avec prévisualisation + sauvegarde + confirmation ;
+4. Surveillance qui survit à la fermeture (service Windows / tâche planifiée) ;
+5. Écriture JSON/XML (Cyberpunk 2077, GTA V), plus de profils de jeux, et
+   mapping glossaire ↔ réglages du jeu affiché en direct ;
+6. Licence, binaire signé, auto-update et artefacts de release en CI ;
+7. Internationalisation (FR/EN) et passe d'accessibilité (clavier, contraste,
+   `prefers-reduced-motion`).

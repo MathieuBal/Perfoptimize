@@ -21,6 +21,9 @@ builder.Logging.ClearProviders(); // a desktop tool should not spam the console
 // Ephemeral loopback port: no conflict with anything the user already runs.
 builder.WebHost.UseUrls("http://127.0.0.1:0");
 builder.Services.AddHttpClient();
+// Continuous background monitoring: sample the machine server-side, always.
+builder.Services.AddSingleton<LiveState>();
+builder.Services.AddHostedService<LiveMonitorHostedService>();
 
 var app = builder.Build();
 
@@ -179,16 +182,44 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
     });
 });
 
-// ----- Live: continuous whole-PC monitoring ----------------------------------
-app.MapGet("/api/live", async () =>
+// ----- Settings guide: explain what each setting does ------------------------
+app.MapGet("/api/settings-guide", (string? bottleneck) =>
 {
-    // One instant of the whole machine: system CPU/RAM, the busiest processes,
-    // and what is competing with the running game right now. The UI polls this.
-    var profiles = GameProfileRepository.LoadBuiltIn();
-    var detected = new RunningGameDetector().DetectAny(profiles);
+    // Plain-language explanations of common graphics settings, plus the
+    // DX11/DX12/Vulkan choice tailored to the measured bottleneck.
+    Enum.TryParse<BottleneckType>(bottleneck, ignoreCase: true, out var type);
+    var detected = new RunningGameDetector().DetectAny(GameProfileRepository.LoadBuiltIn());
+    var renderer = SettingsGlossary.RecommendRenderer(type);
+    return Results.Json(new
+    {
+        game = detected?.Name,
+        gameKnown = detected?.IsKnown ?? false,
+        renderer = new
+        {
+            recommendedId = renderer.OptionId,
+            recommendation = renderer.Text,
+            options = SettingsGlossary.Renderers.Select(r => new { r.Id, r.Name, r.Summary, r.BestWhen }),
+        },
+        settings = SettingsGlossary.Entries.Select(e => new
+        {
+            e.Id, e.Title, e.WhatItChanges, cost = e.Cost.ToString(), e.Guidance,
+        }),
+    });
+});
 
-    var snapshot = await new LiveMonitor().SampleAsync(
-        TimeSpan.FromMilliseconds(350), detected?.ProcessId, detected?.Name);
+// ----- Live: continuous whole-PC monitoring ----------------------------------
+app.MapGet("/api/live", async (LiveState state) =>
+{
+    // Served from the background sampler's latest snapshot (instant); only if it
+    // has not produced one yet do we sample inline as a fallback.
+    var (snapshot, alerts, stableFps, fpsChange) = state.Read();
+    if (snapshot is null)
+    {
+        var profiles = GameProfileRepository.LoadBuiltIn();
+        var detected = new RunningGameDetector().DetectAny(profiles);
+        snapshot = await new LiveMonitor().SampleAsync(
+            TimeSpan.FromMilliseconds(350), detected?.ProcessId, detected?.Name);
+    }
 
     return Results.Json(new
     {
@@ -202,27 +233,43 @@ app.MapGet("/api/live", async () =>
         snapshot.CpuTemperatureC,
         snapshot.GpuTemperatureC,
         snapshot.GpuThrottling,
+        snapshot.DpcPercent,
+        snapshot.InterruptPercent,
+        fps = stableFps ?? snapshot.Fps,
+        snapshot.FpsOnePercentLow,
+        fpsChange = fpsChange is null ? null : new { fpsChange.Before, fpsChange.After, fpsChange.DeltaPercent },
         snapshot.ProcessCount,
         game = snapshot.GameName,
         snapshot.GamePid,
         topByCpu = snapshot.TopByCpu.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
         topByMemory = snapshot.TopByMemory.Select(u => new { u.Pid, u.Name, u.CpuPercent, u.MemoryBytes, u.MemoryPercent, u.IsGame }),
-        alerts = snapshot.Alerts.Select(a => new { kind = a.Kind.ToString(), a.Level, a.Title, a.Detail }),
+        alerts = alerts.Select(a => new { a.Id, a.Kind, a.Level, a.Title, a.Detail, firstSeen = a.FirstSeen.ToString("o") }),
     });
 });
 
 // ----- Network: what is connected and listening ------------------------------
-app.MapGet("/api/network", () =>
+app.MapGet("/api/network", async () =>
 {
-    // Read-only inventory of TCP activity: established connections grouped by
-    // remote host, and the ports open for listening.
+    // Read-only: the TCP summary, plus each outbound connection attributed to the
+    // program that owns it, with the remote resolved to a name where possible.
     var snapshot = new NetworkReader().Read();
+    var connections = new ProcessConnectionReader().Read();
+    var hosts = await HostResolver.ResolveAsync(
+        connections.Select(c => c.RemoteAddress), TimeSpan.FromMilliseconds(1200));
+    foreach (var connection in connections)
+        connection.RemoteHost = hosts.GetValueOrDefault(connection.RemoteAddress);
+
     return Results.Json(new
     {
         snapshot.EstablishedCount,
         snapshot.ListeningCount,
         topRemotes = snapshot.TopRemotes.Select(r => new { r.Address, r.Connections }),
         listeningPorts = snapshot.ListeningPorts,
+        connections = connections.Select(c => new
+        {
+            c.Pid, c.Process, c.RemoteAddress, c.RemoteHost, c.RemotePort, c.State,
+            trust = c.Trust.ToString(), c.Note,
+        }),
     });
 });
 
@@ -398,3 +445,6 @@ internal sealed record ApplyRequest(string? Game, string? Bottleneck, string? Go
 
 /// <summary>Body of a restore request from the UI.</summary>
 internal sealed record RestoreRequest(string? Game);
+
+/// <summary>Exposes the top-level Program to the test host (WebApplicationFactory).</summary>
+public partial class Program;

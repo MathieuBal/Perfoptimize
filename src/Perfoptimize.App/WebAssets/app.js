@@ -39,12 +39,16 @@ const state = {
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
   library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
+  alerts: [], settingsGuide: null,
 };
 
 let countdownTimer = null;
 let chartResizeBound = false;
 let liveTimer = null;
 let liveBusy = false;
+let liveFirstPoll = true;
+let lastFpsChangeKey = null;
+const seenAlertIds = new Set();
 
 // ---- helpers ---------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -269,7 +273,41 @@ function viewAnalyse() {
   } else {
     body = `<div class="empty">Prêt à mesurer. Choisis une durée et un objectif, puis lance l'analyse — Perfoptimize capture les performances réelles et diagnostique le goulot d'étranglement.</div>`;
   }
-  return `<div class="view">${head("02 — Analyse des performances", "Mesurer, pas deviner")}${controls}${body}</div>`;
+  return `<div class="view">${head("02 — Analyse des performances", "Mesurer, pas deviner")}${controls}${body}${renderSettingsGuide()}</div>`;
+}
+
+// Educational block: what each setting does + the DX11/DX12/Vulkan choice.
+function renderSettingsGuide() {
+  const g = state.settingsGuide;
+  if (!g) return `<div class="card">${cardHead("Comprendre les réglages")}<div class="empty" style="margin-top:2px"><span class="spinner-sm"></span> Chargement du guide des réglages…</div></div>`;
+  const COST = { Gpu: ["GPU", C.accent], Cpu: ["CPU", C.warn], Vram: ["VRAM", C.warn], Ram: ["RAM", C.warn], Mixed: ["CPU+GPU", "#8b97a8"] };
+  const rec = g.renderer;
+  const options = rec.options.map((o) => {
+    const active = o.id === rec.recommendedId;
+    return `<div style="flex:1 1 210px;background:#0e131b;border:1px solid ${active ? C.accent : "#1b222d"};border-radius:12px;padding:15px 16px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-weight:600;font-size:14px">${esc(o.name)}</span>${active ? `<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:${C.accent};border:1px solid ${C.accent};border-radius:4px;padding:1px 5px">conseillé</span>` : ""}</div>
+      <div style="font-size:12.5px;color:#a9b3c1;line-height:1.5;margin-bottom:6px">${esc(o.summary)}</div>
+      <div style="font-size:11.5px;color:#5e6a7b;line-height:1.45"><span style="color:#8b97a8">Idéal :</span> ${esc(o.bestWhen)}</div>
+    </div>`;
+  }).join("");
+  const rendererCard = `<div class="card">
+    ${cardHead("Quelle API de rendu : DirectX 11, 12 ou Vulkan ?")}
+    <div style="background:linear-gradient(120deg,#141a24,#10141d);border:1px solid #232b38;border-left:3px solid ${C.accent};border-radius:12px;padding:14px 16px;font-size:13.5px;color:#c3ccd8;line-height:1.55;margin-bottom:14px">${esc(rec.recommendation)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">${options}</div>
+  </div>`;
+  const items = g.settings.map((s) => {
+    const [cl, cc] = COST[s.cost] || ["—", "#8b97a8"];
+    return `<div style="background:#0e131b;border:1px solid #1b222d;border-radius:12px;padding:15px 17px">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px"><span style="font-weight:600;font-size:14px">${esc(s.title)}</span><span style="display:inline-flex;padding:2px 8px;border-radius:5px;font-family:var(--mono);font-size:10px;font-weight:600;color:${cc};background:color-mix(in srgb, ${cc} 16%, transparent)">${cl}</span></div>
+      <div style="font-size:13px;color:#c3ccd8;line-height:1.5;margin-bottom:6px">${esc(s.whatItChanges)}</div>
+      <div style="font-size:12.5px;color:#8b97a8;line-height:1.5">${esc(s.guidance)}</div>
+    </div>`;
+  }).join("");
+  const glossaryCard = `<div class="card">${cardHead("Ce que change chaque réglage")}
+    <p style="margin:0 0 14px;font-size:12.5px;color:#5e6a7b">Les réglages les plus impactants, expliqués simplement — pour ne plus remplir au hasard.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${items}</div>
+  </div>`;
+  return rendererCard + glossaryCard;
 }
 
 function renderResults(r) {
@@ -654,6 +692,28 @@ function viewMoniteur() {
     return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Démarrage du moniteur…</div></div>`;
   }
 
+  // Live FPS hero + automatic change detection (no manual re-measure needed).
+  let fpsHero = "";
+  if (live.fps != null) {
+    const ch = live.fpsChange;
+    const changeBlock = ch
+      ? (() => {
+          const up = ch.deltaPercent >= 0; const col = up ? C.good : C.bad;
+          return `<div style="flex:1;min-width:280px;background:color-mix(in srgb, ${col} 12%, transparent);border:1px solid ${col};border-radius:12px;padding:14px 18px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:700;font-size:15px;color:${col}"><span>Changement détecté</span><span style="font-family:var(--mono)">${Math.round(ch.before)} → ${Math.round(ch.after)} FPS</span><span style="font-family:var(--mono)">(${up ? "+" : ""}${Math.round(ch.deltaPercent)} %)</span></div>
+            <div style="font-size:12.5px;color:#a9b3c1;margin-top:4px">${up ? "Un de tes réglages vient de gagner des FPS — à garder." : "Un de tes réglages vient de coûter des FPS — reviens en arrière si ce n'est pas voulu."}</div>
+          </div>`;
+        })()
+      : `<div style="flex:1;min-width:280px;font-size:12.5px;color:#5e6a7b;line-height:1.5">Change un réglage dans le jeu : le gain (ou la perte) de FPS s'affiche ici <strong style="color:#8b97a8">automatiquement</strong>, sans relancer de mesure.</div>`;
+    fpsHero = `<div class="card" style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
+      <div style="flex:none">
+        <div style="font-family:var(--mono);font-size:44px;font-weight:700;line-height:1;color:${C.accentSoft}">${Math.round(live.fps)}<span style="font-size:18px;color:#8b97a8"> FPS</span></div>
+        <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a8;margin-top:6px">FPS en direct${live.fpsOnePercentLow != null ? ` · 1% low ${Math.round(live.fpsOnePercentLow)}` : ""}</div>
+      </div>
+      ${changeBlock}
+    </div>`;
+  }
+
   const gauges = [];
   gauges.push(gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true));
   if (live.gpuPercent != null)
@@ -665,6 +725,8 @@ function viewMoniteur() {
     gauges.push(gauge({ label: "Temp CPU", value: Math.round(live.cpuTemperatureC), ringValue: live.cpuTemperatureC, unit: "°", sub: "", color: cpuTempColor(live.cpuTemperatureC) }, true));
   if (live.gpuTemperatureC != null)
     gauges.push(gauge({ label: "Temp GPU", value: Math.round(live.gpuTemperatureC), ringValue: live.gpuTemperatureC, unit: "°", sub: live.gpuThrottling ? "throttling" : "", color: live.gpuThrottling ? C.bad : tempColor(live.gpuTemperatureC) }, true));
+  if (live.dpcPercent != null)
+    gauges.push(gauge({ label: "Latence DPC", value: live.dpcPercent.toFixed(1), ringValue: Math.min(100, live.dpcPercent * 5), unit: "%", sub: live.interruptPercent != null ? `ISR ${live.interruptPercent.toFixed(1)} %` : "", color: live.dpcPercent >= 8 ? C.bad : live.dpcPercent >= 4 ? C.warn : C.good }, true));
 
   const noTemp = live.cpuTemperatureC == null && live.gpuTemperatureC == null;
   const tempNote = noTemp
@@ -693,6 +755,7 @@ function viewMoniteur() {
   </div>`;
 
   return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}
+    ${fpsHero}
     <div style="display:flex;flex-wrap:wrap;gap:16px">${gauges.join("")}</div>
     ${tempNote}
     ${sessionCard}
@@ -711,22 +774,56 @@ const WELL_KNOWN_PORTS = { 80: "HTTP", 443: "HTTPS", 53: "DNS", 3389: "RDP", 445
 function viewReseau() {
   const n = state.network;
   const right = `<button class="btn" data-action="rescan-network">Rescanner</button>`;
-  const lead = `<p class="lead">Inventaire en lecture seule de l'activité TCP : les connexions établies (ce qui communique vers l'extérieur) et les ports ouverts en écoute. Utile pour repérer ce qui consomme la bande passante pendant le jeu ou un port inattendu. L'attribution par processus arrivera ensuite.</p>`;
+  const lead = `<p class="lead">Qui, sur ton PC, parle à Internet — et à quoi. Chaque connexion sortante est rattachée au programme qui l'ouvre et la destination est résolue en nom quand c'est possible, pour distinguer le normal (navigateur, Discord, Steam, Windows Update) de l'inhabituel. En lecture seule.</p>`;
   if (n === null) {
-    return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture des connexions réseau…</div></div>`;
+    return `<div class="view">${head("08 — Réseau", "Qui parle à Internet ?", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture des connexions réseau…</div></div>`;
   }
   const statCard = (val, label, color) => `<div class="card" style="flex:1 1 200px">
     <div style="font-family:var(--mono);font-size:34px;font-weight:700;color:${color}">${val}</div>
     <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a8;margin-top:6px">${label}</div>
   </div>`;
 
-  const remotes = (n.topRemotes || []);
-  const remoteRows = remotes.length
-    ? remotes.map((r) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #1b222d">
-        <span style="font-family:var(--mono);font-size:13px;color:#c3ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.address)}</span>
-        <span style="font-family:var(--mono);font-size:12px;color:#8b97a8;flex:none">${r.connections} conn.</span>
-      </div>`).join("")
-    : `<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucune connexion externe établie.</div>`;
+  // Connexions groupées par programme, avec niveau de confiance.
+  const TRUST = { Normal: ["identifié", C.good], Unknown: ["inconnu", C.warn], Suspicious: ["à vérifier", C.bad] };
+  const trustRank = { Suspicious: 0, Unknown: 1, Normal: 2 };
+  const conns = (n.connections || []);
+  const groups = {};
+  for (const c of conns) {
+    const key = c.process || "Programme inconnu";
+    (groups[key] = groups[key] || []).push(c);
+  }
+  const groupKeys = Object.keys(groups).sort((a, b) => {
+    const wa = Math.min(...groups[a].map((c) => trustRank[c.trust] ?? 2));
+    const wb = Math.min(...groups[b].map((c) => trustRank[c.trust] ?? 2));
+    return wa - wb || a.localeCompare(b);
+  });
+  let connBlock;
+  if (!conns.length) {
+    connBlock = `<div class="card">${cardHead("Connexions par programme")}<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucune connexion sortante établie (ou attribution indisponible sans droits suffisants).</div></div>`;
+  } else {
+    connBlock = groupKeys.map((k) => {
+      const rows = groups[k];
+      const worst = rows.reduce((w, c) => (trustRank[c.trust] < trustRank[w] ? c.trust : w), "Normal");
+      const [lbl, col] = TRUST[worst] || TRUST.Unknown;
+      const note = rows.find((c) => c.note)?.note;
+      const dests = rows.map((c) => {
+        const lblPort = WELL_KNOWN_PORTS[c.remotePort];
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #1b222d">
+          <span style="font-family:var(--mono);font-size:12.5px;color:#c3ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.remoteHost || c.remoteAddress)}</span>
+          <span style="font-family:var(--mono);font-size:11.5px;color:#8b97a8;flex:none">:${c.remotePort}${lblPort ? " " + lblPort : ""}</span>
+        </div>`;
+      }).join("");
+      return `<div class="card" style="border-left:3px solid ${col}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-weight:600;font-size:15px">${esc(k)}</span>
+          <span style="display:inline-flex;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${col};background:color-mix(in srgb, ${col} 16%, transparent)">${lbl}</span>
+          <span style="font-family:var(--mono);font-size:11px;color:#5e6a7b;margin-left:auto">${rows.length} conn.</span>
+        </div>
+        ${note ? `<div style="font-size:12.5px;color:${col};margin-bottom:8px">${esc(note)}</div>` : ""}
+        <div>${dests}</div>
+      </div>`;
+    }).join("");
+  }
 
   const ports = (n.listeningPorts || []);
   const portChips = ports.length
@@ -736,14 +833,25 @@ function viewReseau() {
       }).join("")
     : `<div style="font-size:13px;color:#5e6a7b">Aucun port en écoute détecté.</div>`;
 
-  return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}
+  const guide = `<div class="card">${cardHead("Comment savoir si c'est normal ?", C.accent)}
+    <div style="font-size:13px;color:#a9b3c1;line-height:1.6">
+      <p style="margin:0 0 10px"><span style="color:${C.good}">Normal :</span> ton navigateur, Discord, Steam/Epic, un jeu, et <span style="font-family:var(--mono)">svchost</span> (Windows Update/télémétrie) qui parlent à des noms connus (google, cloudflare, akamai, steamcontent, discord…) sur les ports 443/80.</p>
+      <p style="margin:0 0 10px"><span style="color:${C.warn}">À regarder :</span> un programme que tu ne reconnais pas, ou une destination sans nom sur un port inhabituel. Ce n'est pas forcément malveillant, mais mérite un coup d'œil.</p>
+      <p style="margin:0"><span style="color:${C.bad}">Suspect :</span> un exécutable lancé depuis un dossier temporaire/téléchargements. Clic droit sur le process (Gestionnaire des tâches) → « Ouvrir l'emplacement du fichier », vérifie l'éditeur/la signature.</p>
+      <p style="margin:12px 0 0;font-size:12px;color:#5e6a7b">Ce panneau t'aide à <strong style="color:#8b97a8">voir et comprendre</strong> — pour un vrai verdict, lance un scan Windows Defender ou Malwarebytes.</p>
+    </div>
+  </div>`;
+
+  return `<div class="view">${head("08 — Réseau", "Qui parle à Internet ?", right)}${lead}
     <div style="display:flex;flex-wrap:wrap;gap:16px">
       ${statCard(n.establishedCount, "Connexions établies", C.accentSoft)}
       ${statCard(n.listeningCount, "Ports en écoute", C.warn)}
     </div>
-    <div class="card">${cardHead("Connexions sortantes")}<div style="margin-top:2px">${remoteRows}</div></div>
-    <div class="card">${cardHead("Ports en écoute", C.warn)}<div style="margin-top:2px">${portChips}</div></div>
-    <div class="empty">Un port en écoute n'est pas un problème en soi (jeux, services Windows, launchers en ouvrent). Ce panneau sert à repérer l'inhabituel, pas à alarmer.</div>
+    ${connBlock}
+    ${guide}
+    <div class="card">${cardHead("Ports en écoute", C.warn)}<div style="margin-top:2px">${portChips}</div>
+      <div style="font-size:12px;color:#5e6a7b;margin-top:10px">Un port en écoute n'est pas un problème en soi (jeux, services Windows, launchers en ouvrent).</div>
+    </div>
   </div>`;
 }
 
@@ -858,19 +966,17 @@ function render() {
 }
 
 function setView(v) {
-  // The Moniteur polls continuously; stop it as soon as we leave the view.
-  if (state.view === "moniteur" && v !== "moniteur") stopLive();
   state.view = v;
   // lazy loads
   if (v === "library" && state.library === null) loadLibrary();
   if (v === "system" && state.system === null) loadSystem();
   if (v === "hardware" && !state.hardware) loadHardware();
+  if (v === "analyse" && state.settingsGuide === null) loadSettingsGuide();
   if (v === "incidents" && state.incidents === null) loadIncidents();
   if (v === "reseau" && state.network === null) loadNetwork();
   if (v === "tools" && !state.tools) loadTools();
   render();
   window.scrollTo(0, 0); // a fresh view starts at the top, under the sticky topbar
-  if (v === "moniteur") startLive();
 }
 
 // ---- FPS canvas chart ------------------------------------------------------
@@ -957,25 +1063,83 @@ async function loadNetwork() {
   catch { state.network = { establishedCount: 0, listeningCount: 0, topRemotes: [], listeningPorts: [] }; }
   if (state.view === "reseau") render();
 }
+async function loadSettingsGuide() {
+  const bt = state.lastReport && state.lastReport.bottleneck ? state.lastReport.bottleneck.type : "";
+  try { state.settingsGuide = await getJson("/api/settings-guide?bottleneck=" + encodeURIComponent(bt)); }
+  catch { state.settingsGuide = null; }
+  if (state.view === "analyse") render();
+}
 
-// ---- Live monitor (continuous polling) -------------------------------------
-async function loadLiveOnce() {
-  if (liveBusy) return; // never overlap two samples
+// ---- Live monitor (global continuous polling) ------------------------------
+// The backend samples continuously on its own; the UI polls it from every view
+// so alerts (overheating, a resource hog, driver latency) surface even when the
+// user is not on the Moniteur.
+async function pollLive() {
+  if (liveBusy) return;
   liveBusy = true;
   try {
     const r = await getJson("/api/live");
     state.live = r;
+    state.alerts = r.alerts || [];
+    const isFirst = liveFirstPoll;
+    liveFirstPoll = false;
+    // Don't fire a burst of notifications for conditions already active at startup.
+    for (const a of state.alerts) {
+      if (seenAlertIds.has(a.id)) continue;
+      seenAlertIds.add(a.id);
+      if (!isFirst) notifyAlert(a);
+    }
+    handleFpsChange(r.fpsChange, isFirst);
+    updateAlertChip();
     if (state.view === "moniteur") render();
   } catch { /* transient; keep the last snapshot on screen */ }
   finally { liveBusy = false; }
 }
-function startLive() {
+function startGlobalLive() {
   if (liveTimer) return;
-  loadLiveOnce();
-  liveTimer = setInterval(loadLiveOnce, 2000);
+  pollLive();
+  liveTimer = setInterval(pollLive, 3000);
 }
 function stopLive() {
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+}
+function notifyAlert(a) {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted")
+      new Notification("Perfoptimize — " + a.title, { body: a.detail, tag: "perfoptimize-" + a.id });
+  } catch { /* notifications are a bonus, never required */ }
+}
+function handleFpsChange(ch, isFirst) {
+  if (!ch) { lastFpsChangeKey = null; return; }
+  const key = `${ch.before}->${ch.after}`;
+  if (key === lastFpsChangeKey) return; // already announced this shift
+  lastFpsChangeKey = key;
+  if (isFirst) return;
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted")
+      new Notification("Perfoptimize — Changement détecté", {
+        body: `${Math.round(ch.before)} → ${Math.round(ch.after)} FPS (${ch.deltaPercent >= 0 ? "+" : ""}${Math.round(ch.deltaPercent)} %)`,
+        tag: "perfoptimize-fpschange",
+      });
+  } catch { /* ignore */ }
+}
+function ensureNotifyPermission() {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "default")
+      Notification.requestPermission();
+  } catch { /* ignore */ }
+}
+function updateAlertChip() {
+  const chip = $("alert-chip");
+  if (!chip) return;
+  const active = state.alerts || [];
+  if (!active.length) { chip.classList.add("hidden"); return; }
+  const color = active.some((a) => a.level === "bad") ? C.bad : C.warn;
+  chip.classList.remove("hidden");
+  chip.style.color = color;
+  chip.style.borderColor = color;
+  const count = $("alert-count");
+  if (count) count.textContent = String(active.length);
 }
 async function loadVersion() {
   try { const v = await getJson("/api/version"); $("version").textContent = `· v${v.version}`; } catch { /* non-essential */ }
@@ -1015,6 +1179,7 @@ async function runMonitor() {
     const r = await postJson("/api/monitor", { seconds: state.seconds, goal: state.goal, targetFps: state.targetFps });
     state.lastReport = r;
     state.monitorPhase = "done";
+    loadSettingsGuide(); // re-tailor the API recommendation to the measured bottleneck
     // keep the detected game fresh for the topbar/overview
     if (r.game && (!state.games || !state.games.running)) loadGames();
   } catch (e) {
@@ -1126,8 +1291,14 @@ $("quit").addEventListener("click", async () => {
 });
 
 // ---- boot ------------------------------------------------------------------
+document.addEventListener("click", ensureNotifyPermission, { once: true });
+const alertChip = $("alert-chip");
+if (alertChip) alertChip.addEventListener("click", () => setView("moniteur"));
+
 render();
 loadGames();
 loadHardware();
 loadTools();
 loadVersion();
+startGlobalLive(); // continuous, from every view
+

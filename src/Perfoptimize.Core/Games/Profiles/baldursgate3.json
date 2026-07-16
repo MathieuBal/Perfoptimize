@@ -1,0 +1,31 @@
+{
+  "name": "Baldur's Gate 3",
+  "executables": ["bg3.exe", "bg3_dx11.exe"],
+  "upscalers": ["dlss", "fsr"],
+  "advisories": [
+    {
+      "setting": "Nuages / brouillard volumétrique en Ultra",
+      "kind": "poorValue",
+      "recommendation": "Élevé plutôt qu'Ultra",
+      "detail": "Le brouillard volumétrique et les nuages en Ultra coûtent cher pour une différence subtile ; Élevé conserve l'ambiance à moindre coût.",
+      "evidence": "communityValidated"
+    },
+    {
+      "setting": "Densité de foule (Acte 3)",
+      "kind": "stutter",
+      "recommendation": "Baisser en ville",
+      "detail": "L'Acte 3 (Baldur's Gate) est fortement limité par le CPU : baisser la densité de foule réduit les chutes de FPS et les à-coups en ville.",
+      "evidence": "communityValidated"
+    }
+  ],
+  "settings": [
+    { "name": "Cloud Quality", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 6 },
+    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Model Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 5 },
+    { "name": "Ambient Occlusion", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 5 },
+    {
+      "name": "Texture Quality", "impact": "vram", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2,
+      "vramGiBByLevel": { "Low": 3, "Medium": 4.5, "High": 6 }
+    }
+  ]
+}

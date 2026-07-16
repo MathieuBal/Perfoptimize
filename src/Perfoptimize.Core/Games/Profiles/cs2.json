@@ -1,0 +1,28 @@
+{
+  "name": "Counter-Strike 2",
+  "executables": ["cs2.exe"],
+  "upscalers": [],
+  "advisories": [
+    {
+      "setting": "Anticrénelage MSAA 8x",
+      "kind": "poorValue",
+      "recommendation": "Rester à 2x ou 4x MSAA",
+      "detail": "Le MSAA 8x coûte beaucoup de FPS pour un gain de netteté minime. En compétition, 2x ou 4x suffit largement et laisse plus de marge de framerate.",
+      "evidence": "communityValidated"
+    },
+    {
+      "setting": "Détail de la végétation élevé",
+      "kind": "poorValue",
+      "recommendation": "Baisser pour la lisibilité et les FPS",
+      "detail": "Une végétation dense masque les ennemis et coûte des FPS ; la baisser améliore à la fois la lisibilité compétitive et la fluidité.",
+      "evidence": "communityValidated"
+    }
+  ],
+  "settings": [
+    { "name": "Multisample Anti-Aliasing (MSAA)", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3, "estimatedGainPercent": 12 },
+    { "name": "Shadow Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 6 },
+    { "name": "Particle Detail", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 5 },
+    { "name": "Ambient Occlusion", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 5 },
+    { "name": "Model / Texture Detail", "impact": "vram", "qualityLoss": 1, "performanceGain": 1, "estimatedGainPercent": 3 }
+  ]
+}
