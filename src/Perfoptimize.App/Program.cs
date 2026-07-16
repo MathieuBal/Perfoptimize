@@ -445,3 +445,6 @@ internal sealed record ApplyRequest(string? Game, string? Bottleneck, string? Go
 
 /// <summary>Body of a restore request from the UI.</summary>
 internal sealed record RestoreRequest(string? Game);
+
+/// <summary>Exposes the top-level Program to the test host (WebApplicationFactory).</summary>
+public partial class Program;
