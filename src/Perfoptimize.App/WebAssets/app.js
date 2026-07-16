@@ -716,22 +716,56 @@ const WELL_KNOWN_PORTS = { 80: "HTTP", 443: "HTTPS", 53: "DNS", 3389: "RDP", 445
 function viewReseau() {
   const n = state.network;
   const right = `<button class="btn" data-action="rescan-network">Rescanner</button>`;
-  const lead = `<p class="lead">Inventaire en lecture seule de l'activité TCP : les connexions établies (ce qui communique vers l'extérieur) et les ports ouverts en écoute. Utile pour repérer ce qui consomme la bande passante pendant le jeu ou un port inattendu. L'attribution par processus arrivera ensuite.</p>`;
+  const lead = `<p class="lead">Qui, sur ton PC, parle à Internet — et à quoi. Chaque connexion sortante est rattachée au programme qui l'ouvre et la destination est résolue en nom quand c'est possible, pour distinguer le normal (navigateur, Discord, Steam, Windows Update) de l'inhabituel. En lecture seule.</p>`;
   if (n === null) {
-    return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture des connexions réseau…</div></div>`;
+    return `<div class="view">${head("08 — Réseau", "Qui parle à Internet ?", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture des connexions réseau…</div></div>`;
   }
   const statCard = (val, label, color) => `<div class="card" style="flex:1 1 200px">
     <div style="font-family:var(--mono);font-size:34px;font-weight:700;color:${color}">${val}</div>
     <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a8;margin-top:6px">${label}</div>
   </div>`;
 
-  const remotes = (n.topRemotes || []);
-  const remoteRows = remotes.length
-    ? remotes.map((r) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #1b222d">
-        <span style="font-family:var(--mono);font-size:13px;color:#c3ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.address)}</span>
-        <span style="font-family:var(--mono);font-size:12px;color:#8b97a8;flex:none">${r.connections} conn.</span>
-      </div>`).join("")
-    : `<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucune connexion externe établie.</div>`;
+  // Connexions groupées par programme, avec niveau de confiance.
+  const TRUST = { Normal: ["identifié", C.good], Unknown: ["inconnu", C.warn], Suspicious: ["à vérifier", C.bad] };
+  const trustRank = { Suspicious: 0, Unknown: 1, Normal: 2 };
+  const conns = (n.connections || []);
+  const groups = {};
+  for (const c of conns) {
+    const key = c.process || "Programme inconnu";
+    (groups[key] = groups[key] || []).push(c);
+  }
+  const groupKeys = Object.keys(groups).sort((a, b) => {
+    const wa = Math.min(...groups[a].map((c) => trustRank[c.trust] ?? 2));
+    const wb = Math.min(...groups[b].map((c) => trustRank[c.trust] ?? 2));
+    return wa - wb || a.localeCompare(b);
+  });
+  let connBlock;
+  if (!conns.length) {
+    connBlock = `<div class="card">${cardHead("Connexions par programme")}<div style="font-size:13px;color:#5e6a7b;padding:6px 0">Aucune connexion sortante établie (ou attribution indisponible sans droits suffisants).</div></div>`;
+  } else {
+    connBlock = groupKeys.map((k) => {
+      const rows = groups[k];
+      const worst = rows.reduce((w, c) => (trustRank[c.trust] < trustRank[w] ? c.trust : w), "Normal");
+      const [lbl, col] = TRUST[worst] || TRUST.Unknown;
+      const note = rows.find((c) => c.note)?.note;
+      const dests = rows.map((c) => {
+        const lblPort = WELL_KNOWN_PORTS[c.remotePort];
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #1b222d">
+          <span style="font-family:var(--mono);font-size:12.5px;color:#c3ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.remoteHost || c.remoteAddress)}</span>
+          <span style="font-family:var(--mono);font-size:11.5px;color:#8b97a8;flex:none">:${c.remotePort}${lblPort ? " " + lblPort : ""}</span>
+        </div>`;
+      }).join("");
+      return `<div class="card" style="border-left:3px solid ${col}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-weight:600;font-size:15px">${esc(k)}</span>
+          <span style="display:inline-flex;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${col};background:color-mix(in srgb, ${col} 16%, transparent)">${lbl}</span>
+          <span style="font-family:var(--mono);font-size:11px;color:#5e6a7b;margin-left:auto">${rows.length} conn.</span>
+        </div>
+        ${note ? `<div style="font-size:12.5px;color:${col};margin-bottom:8px">${esc(note)}</div>` : ""}
+        <div>${dests}</div>
+      </div>`;
+    }).join("");
+  }
 
   const ports = (n.listeningPorts || []);
   const portChips = ports.length
@@ -741,14 +775,25 @@ function viewReseau() {
       }).join("")
     : `<div style="font-size:13px;color:#5e6a7b">Aucun port en écoute détecté.</div>`;
 
-  return `<div class="view">${head("08 — Réseau", "Connexions & ports", right)}${lead}
+  const guide = `<div class="card">${cardHead("Comment savoir si c'est normal ?", C.accent)}
+    <div style="font-size:13px;color:#a9b3c1;line-height:1.6">
+      <p style="margin:0 0 10px"><span style="color:${C.good}">Normal :</span> ton navigateur, Discord, Steam/Epic, un jeu, et <span style="font-family:var(--mono)">svchost</span> (Windows Update/télémétrie) qui parlent à des noms connus (google, cloudflare, akamai, steamcontent, discord…) sur les ports 443/80.</p>
+      <p style="margin:0 0 10px"><span style="color:${C.warn}">À regarder :</span> un programme que tu ne reconnais pas, ou une destination sans nom sur un port inhabituel. Ce n'est pas forcément malveillant, mais mérite un coup d'œil.</p>
+      <p style="margin:0"><span style="color:${C.bad}">Suspect :</span> un exécutable lancé depuis un dossier temporaire/téléchargements. Clic droit sur le process (Gestionnaire des tâches) → « Ouvrir l'emplacement du fichier », vérifie l'éditeur/la signature.</p>
+      <p style="margin:12px 0 0;font-size:12px;color:#5e6a7b">Ce panneau t'aide à <strong style="color:#8b97a8">voir et comprendre</strong> — pour un vrai verdict, lance un scan Windows Defender ou Malwarebytes.</p>
+    </div>
+  </div>`;
+
+  return `<div class="view">${head("08 — Réseau", "Qui parle à Internet ?", right)}${lead}
     <div style="display:flex;flex-wrap:wrap;gap:16px">
       ${statCard(n.establishedCount, "Connexions établies", C.accentSoft)}
       ${statCard(n.listeningCount, "Ports en écoute", C.warn)}
     </div>
-    <div class="card">${cardHead("Connexions sortantes")}<div style="margin-top:2px">${remoteRows}</div></div>
-    <div class="card">${cardHead("Ports en écoute", C.warn)}<div style="margin-top:2px">${portChips}</div></div>
-    <div class="empty">Un port en écoute n'est pas un problème en soi (jeux, services Windows, launchers en ouvrent). Ce panneau sert à repérer l'inhabituel, pas à alarmer.</div>
+    ${connBlock}
+    ${guide}
+    <div class="card">${cardHead("Ports en écoute", C.warn)}<div style="margin-top:2px">${portChips}</div>
+      <div style="font-size:12px;color:#5e6a7b;margin-top:10px">Un port en écoute n'est pas un problème en soi (jeux, services Windows, launchers en ouvrent).</div>
+    </div>
   </div>`;
 }
 

@@ -220,17 +220,28 @@ app.MapGet("/api/live", async (LiveState state) =>
 });
 
 // ----- Network: what is connected and listening ------------------------------
-app.MapGet("/api/network", () =>
+app.MapGet("/api/network", async () =>
 {
-    // Read-only inventory of TCP activity: established connections grouped by
-    // remote host, and the ports open for listening.
+    // Read-only: the TCP summary, plus each outbound connection attributed to the
+    // program that owns it, with the remote resolved to a name where possible.
     var snapshot = new NetworkReader().Read();
+    var connections = new ProcessConnectionReader().Read();
+    var hosts = await HostResolver.ResolveAsync(
+        connections.Select(c => c.RemoteAddress), TimeSpan.FromMilliseconds(1200));
+    foreach (var connection in connections)
+        connection.RemoteHost = hosts.GetValueOrDefault(connection.RemoteAddress);
+
     return Results.Json(new
     {
         snapshot.EstablishedCount,
         snapshot.ListeningCount,
         topRemotes = snapshot.TopRemotes.Select(r => new { r.Address, r.Connections }),
         listeningPorts = snapshot.ListeningPorts,
+        connections = connections.Select(c => new
+        {
+            c.Pid, c.Process, c.RemoteAddress, c.RemoteHost, c.RemotePort, c.State,
+            trust = c.Trust.ToString(), c.Note,
+        }),
     });
 });
 
