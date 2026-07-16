@@ -32,7 +32,8 @@ public sealed class LiveMonitorHostedService : BackgroundService
             {
                 var detected = detector.DetectAny(profiles);
                 var snapshot = await monitor.SampleAsync(
-                    SampleWindow, detected?.ProcessId, detected?.Name, stoppingToken);
+                    SampleWindow, detected?.ProcessId, detected?.Name,
+                    sampleFps: true, cancellationToken: stoppingToken);
                 _state.Update(snapshot);
             }
             catch (OperationCanceledException)

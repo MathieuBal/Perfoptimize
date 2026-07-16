@@ -212,7 +212,7 @@ app.MapGet("/api/live", async (LiveState state) =>
 {
     // Served from the background sampler's latest snapshot (instant); only if it
     // has not produced one yet do we sample inline as a fallback.
-    var (snapshot, alerts) = state.Read();
+    var (snapshot, alerts, stableFps, fpsChange) = state.Read();
     if (snapshot is null)
     {
         var profiles = GameProfileRepository.LoadBuiltIn();
@@ -235,6 +235,9 @@ app.MapGet("/api/live", async (LiveState state) =>
         snapshot.GpuThrottling,
         snapshot.DpcPercent,
         snapshot.InterruptPercent,
+        fps = stableFps ?? snapshot.Fps,
+        snapshot.FpsOnePercentLow,
+        fpsChange = fpsChange is null ? null : new { fpsChange.Before, fpsChange.After, fpsChange.DeltaPercent },
         snapshot.ProcessCount,
         game = snapshot.GameName,
         snapshot.GamePid,

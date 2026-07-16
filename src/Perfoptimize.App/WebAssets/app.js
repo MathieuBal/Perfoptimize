@@ -47,6 +47,7 @@ let chartResizeBound = false;
 let liveTimer = null;
 let liveBusy = false;
 let liveFirstPoll = true;
+let lastFpsChangeKey = null;
 const seenAlertIds = new Set();
 
 // ---- helpers ---------------------------------------------------------------
@@ -691,6 +692,28 @@ function viewMoniteur() {
     return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}<div class="empty"><span class="spinner-sm"></span> Démarrage du moniteur…</div></div>`;
   }
 
+  // Live FPS hero + automatic change detection (no manual re-measure needed).
+  let fpsHero = "";
+  if (live.fps != null) {
+    const ch = live.fpsChange;
+    const changeBlock = ch
+      ? (() => {
+          const up = ch.deltaPercent >= 0; const col = up ? C.good : C.bad;
+          return `<div style="flex:1;min-width:280px;background:color-mix(in srgb, ${col} 12%, transparent);border:1px solid ${col};border-radius:12px;padding:14px 18px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:700;font-size:15px;color:${col}"><span>Changement détecté</span><span style="font-family:var(--mono)">${Math.round(ch.before)} → ${Math.round(ch.after)} FPS</span><span style="font-family:var(--mono)">(${up ? "+" : ""}${Math.round(ch.deltaPercent)} %)</span></div>
+            <div style="font-size:12.5px;color:#a9b3c1;margin-top:4px">${up ? "Un de tes réglages vient de gagner des FPS — à garder." : "Un de tes réglages vient de coûter des FPS — reviens en arrière si ce n'est pas voulu."}</div>
+          </div>`;
+        })()
+      : `<div style="flex:1;min-width:280px;font-size:12.5px;color:#5e6a7b;line-height:1.5">Change un réglage dans le jeu : le gain (ou la perte) de FPS s'affiche ici <strong style="color:#8b97a8">automatiquement</strong>, sans relancer de mesure.</div>`;
+    fpsHero = `<div class="card" style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
+      <div style="flex:none">
+        <div style="font-family:var(--mono);font-size:44px;font-weight:700;line-height:1;color:${C.accentSoft}">${Math.round(live.fps)}<span style="font-size:18px;color:#8b97a8"> FPS</span></div>
+        <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b97a8;margin-top:6px">FPS en direct${live.fpsOnePercentLow != null ? ` · 1% low ${Math.round(live.fpsOnePercentLow)}` : ""}</div>
+      </div>
+      ${changeBlock}
+    </div>`;
+  }
+
   const gauges = [];
   gauges.push(gauge({ label: "CPU système", value: pct(live.systemCpuPercent), ringValue: live.systemCpuPercent, unit: "%", sub: `${live.processCount} processus`, color: usageColor(live.systemCpuPercent) }, true));
   if (live.gpuPercent != null)
@@ -732,6 +755,7 @@ function viewMoniteur() {
   </div>`;
 
   return `<div class="view">${head(kicker, "Moniteur temps réel", right)}${lead}
+    ${fpsHero}
     <div style="display:flex;flex-wrap:wrap;gap:16px">${gauges.join("")}</div>
     ${tempNote}
     ${sessionCard}
@@ -1057,17 +1081,15 @@ async function pollLive() {
     const r = await getJson("/api/live");
     state.live = r;
     state.alerts = r.alerts || [];
-    if (liveFirstPoll) {
-      // Don't fire a burst of notifications for conditions already active at startup.
-      for (const a of state.alerts) seenAlertIds.add(a.id);
-      liveFirstPoll = false;
-    } else {
-      for (const a of state.alerts) {
-        if (seenAlertIds.has(a.id)) continue;
-        seenAlertIds.add(a.id);
-        notifyAlert(a);
-      }
+    const isFirst = liveFirstPoll;
+    liveFirstPoll = false;
+    // Don't fire a burst of notifications for conditions already active at startup.
+    for (const a of state.alerts) {
+      if (seenAlertIds.has(a.id)) continue;
+      seenAlertIds.add(a.id);
+      if (!isFirst) notifyAlert(a);
     }
+    handleFpsChange(r.fpsChange, isFirst);
     updateAlertChip();
     if (state.view === "moniteur") render();
   } catch { /* transient; keep the last snapshot on screen */ }
@@ -1086,6 +1108,20 @@ function notifyAlert(a) {
     if (typeof Notification !== "undefined" && Notification.permission === "granted")
       new Notification("Perfoptimize — " + a.title, { body: a.detail, tag: "perfoptimize-" + a.id });
   } catch { /* notifications are a bonus, never required */ }
+}
+function handleFpsChange(ch, isFirst) {
+  if (!ch) { lastFpsChangeKey = null; return; }
+  const key = `${ch.before}->${ch.after}`;
+  if (key === lastFpsChangeKey) return; // already announced this shift
+  lastFpsChangeKey = key;
+  if (isFirst) return;
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted")
+      new Notification("Perfoptimize — Changement détecté", {
+        body: `${Math.round(ch.before)} → ${Math.round(ch.after)} FPS (${ch.deltaPercent >= 0 ? "+" : ""}${Math.round(ch.deltaPercent)} %)`,
+        tag: "perfoptimize-fpschange",
+      });
+  } catch { /* ignore */ }
 }
 function ensureNotifyPermission() {
   try {

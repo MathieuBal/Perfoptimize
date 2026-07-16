@@ -34,6 +34,8 @@ public static class LiveUsageCalculator
         bool? gpuThrottling = null,
         double? dpcPercent = null,
         double? interruptPercent = null,
+        double? fps = null,
+        double? fpsOnePercentLow = null,
         int topN = 6)
     {
         var previousCpu = new Dictionary<int, TimeSpan>(before.Count);
@@ -99,6 +101,8 @@ public static class LiveUsageCalculator
             GpuThrottling = gpuThrottling,
             DpcPercent = dpcPercent,
             InterruptPercent = interruptPercent,
+            Fps = fps,
+            FpsOnePercentLow = fpsOnePercentLow,
             ProcessCount = after.Count,
             GamePid = gamePid,
             GameName = gameName,

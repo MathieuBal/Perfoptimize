@@ -52,6 +52,9 @@ public sealed class LiveSnapshot
     public double? DpcPercent { get; init; }
     /// <summary>Share of CPU time servicing hardware interrupts.</summary>
     public double? InterruptPercent { get; init; }
+    /// <summary>Live average FPS over the last short capture (PresentMon, Windows). Null when unavailable.</summary>
+    public double? Fps { get; init; }
+    public double? FpsOnePercentLow { get; init; }
     public int ProcessCount { get; init; }
     public string? GameName { get; init; }
     public int? GamePid { get; init; }
