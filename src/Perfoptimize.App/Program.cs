@@ -182,6 +182,31 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
     });
 });
 
+// ----- Settings guide: explain what each setting does ------------------------
+app.MapGet("/api/settings-guide", (string? bottleneck) =>
+{
+    // Plain-language explanations of common graphics settings, plus the
+    // DX11/DX12/Vulkan choice tailored to the measured bottleneck.
+    Enum.TryParse<BottleneckType>(bottleneck, ignoreCase: true, out var type);
+    var detected = new RunningGameDetector().DetectAny(GameProfileRepository.LoadBuiltIn());
+    var renderer = SettingsGlossary.RecommendRenderer(type);
+    return Results.Json(new
+    {
+        game = detected?.Name,
+        gameKnown = detected?.IsKnown ?? false,
+        renderer = new
+        {
+            recommendedId = renderer.OptionId,
+            recommendation = renderer.Text,
+            options = SettingsGlossary.Renderers.Select(r => new { r.Id, r.Name, r.Summary, r.BestWhen }),
+        },
+        settings = SettingsGlossary.Entries.Select(e => new
+        {
+            e.Id, e.Title, e.WhatItChanges, cost = e.Cost.ToString(), e.Guidance,
+        }),
+    });
+});
+
 // ----- Live: continuous whole-PC monitoring ----------------------------------
 app.MapGet("/api/live", async (LiveState state) =>
 {

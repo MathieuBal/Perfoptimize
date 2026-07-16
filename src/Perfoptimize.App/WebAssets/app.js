@@ -39,7 +39,7 @@ const state = {
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
   library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
-  alerts: [],
+  alerts: [], settingsGuide: null,
 };
 
 let countdownTimer = null;
@@ -272,7 +272,41 @@ function viewAnalyse() {
   } else {
     body = `<div class="empty">Prêt à mesurer. Choisis une durée et un objectif, puis lance l'analyse — Perfoptimize capture les performances réelles et diagnostique le goulot d'étranglement.</div>`;
   }
-  return `<div class="view">${head("02 — Analyse des performances", "Mesurer, pas deviner")}${controls}${body}</div>`;
+  return `<div class="view">${head("02 — Analyse des performances", "Mesurer, pas deviner")}${controls}${body}${renderSettingsGuide()}</div>`;
+}
+
+// Educational block: what each setting does + the DX11/DX12/Vulkan choice.
+function renderSettingsGuide() {
+  const g = state.settingsGuide;
+  if (!g) return `<div class="card">${cardHead("Comprendre les réglages")}<div class="empty" style="margin-top:2px"><span class="spinner-sm"></span> Chargement du guide des réglages…</div></div>`;
+  const COST = { Gpu: ["GPU", C.accent], Cpu: ["CPU", C.warn], Vram: ["VRAM", C.warn], Ram: ["RAM", C.warn], Mixed: ["CPU+GPU", "#8b97a8"] };
+  const rec = g.renderer;
+  const options = rec.options.map((o) => {
+    const active = o.id === rec.recommendedId;
+    return `<div style="flex:1 1 210px;background:#0e131b;border:1px solid ${active ? C.accent : "#1b222d"};border-radius:12px;padding:15px 16px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-weight:600;font-size:14px">${esc(o.name)}</span>${active ? `<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:${C.accent};border:1px solid ${C.accent};border-radius:4px;padding:1px 5px">conseillé</span>` : ""}</div>
+      <div style="font-size:12.5px;color:#a9b3c1;line-height:1.5;margin-bottom:6px">${esc(o.summary)}</div>
+      <div style="font-size:11.5px;color:#5e6a7b;line-height:1.45"><span style="color:#8b97a8">Idéal :</span> ${esc(o.bestWhen)}</div>
+    </div>`;
+  }).join("");
+  const rendererCard = `<div class="card">
+    ${cardHead("Quelle API de rendu : DirectX 11, 12 ou Vulkan ?")}
+    <div style="background:linear-gradient(120deg,#141a24,#10141d);border:1px solid #232b38;border-left:3px solid ${C.accent};border-radius:12px;padding:14px 16px;font-size:13.5px;color:#c3ccd8;line-height:1.55;margin-bottom:14px">${esc(rec.recommendation)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">${options}</div>
+  </div>`;
+  const items = g.settings.map((s) => {
+    const [cl, cc] = COST[s.cost] || ["—", "#8b97a8"];
+    return `<div style="background:#0e131b;border:1px solid #1b222d;border-radius:12px;padding:15px 17px">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px"><span style="font-weight:600;font-size:14px">${esc(s.title)}</span><span style="display:inline-flex;padding:2px 8px;border-radius:5px;font-family:var(--mono);font-size:10px;font-weight:600;color:${cc};background:color-mix(in srgb, ${cc} 16%, transparent)">${cl}</span></div>
+      <div style="font-size:13px;color:#c3ccd8;line-height:1.5;margin-bottom:6px">${esc(s.whatItChanges)}</div>
+      <div style="font-size:12.5px;color:#8b97a8;line-height:1.5">${esc(s.guidance)}</div>
+    </div>`;
+  }).join("");
+  const glossaryCard = `<div class="card">${cardHead("Ce que change chaque réglage")}
+    <p style="margin:0 0 14px;font-size:12.5px;color:#5e6a7b">Les réglages les plus impactants, expliqués simplement — pour ne plus remplir au hasard.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${items}</div>
+  </div>`;
+  return rendererCard + glossaryCard;
 }
 
 function renderResults(r) {
@@ -913,6 +947,7 @@ function setView(v) {
   if (v === "library" && state.library === null) loadLibrary();
   if (v === "system" && state.system === null) loadSystem();
   if (v === "hardware" && !state.hardware) loadHardware();
+  if (v === "analyse" && state.settingsGuide === null) loadSettingsGuide();
   if (v === "incidents" && state.incidents === null) loadIncidents();
   if (v === "reseau" && state.network === null) loadNetwork();
   if (v === "tools" && !state.tools) loadTools();
@@ -1003,6 +1038,12 @@ async function loadNetwork() {
   try { state.network = await getJson("/api/network"); }
   catch { state.network = { establishedCount: 0, listeningCount: 0, topRemotes: [], listeningPorts: [] }; }
   if (state.view === "reseau") render();
+}
+async function loadSettingsGuide() {
+  const bt = state.lastReport && state.lastReport.bottleneck ? state.lastReport.bottleneck.type : "";
+  try { state.settingsGuide = await getJson("/api/settings-guide?bottleneck=" + encodeURIComponent(bt)); }
+  catch { state.settingsGuide = null; }
+  if (state.view === "analyse") render();
 }
 
 // ---- Live monitor (global continuous polling) ------------------------------
@@ -1102,6 +1143,7 @@ async function runMonitor() {
     const r = await postJson("/api/monitor", { seconds: state.seconds, goal: state.goal, targetFps: state.targetFps });
     state.lastReport = r;
     state.monitorPhase = "done";
+    loadSettingsGuide(); // re-tailor the API recommendation to the measured bottleneck
     // keep the detected game fresh for the topbar/overview
     if (r.game && (!state.games || !state.games.running)) loadGames();
   } catch (e) {
