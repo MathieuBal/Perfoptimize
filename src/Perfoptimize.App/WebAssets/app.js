@@ -39,7 +39,7 @@ const state = {
   // data caches (null = not loaded yet)
   games: null, hardware: null, tools: null, system: null,
   library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
-  alerts: [], settingsGuide: null,
+  alerts: [], settingsGuide: null, startup: null,
 };
 
 let countdownTimer = null;
@@ -873,19 +873,47 @@ function incidentWhen(iso) {
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
-function viewIncidents() {
-  const lead = `<p class="lead">Post-mortem en lecture seule : Perfoptimize lit l'historique d'événements de Windows (14 derniers jours) et explique chaque incident — crash, écran bleu, plantage GPU, arrêt inattendu — avec sa cause probable et une solution. Rien n'est modifié.</p>`;
-  if (state.incidents === null) {
-    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div></div>`;
-  }
-  if (!state.incidents.supported) {
-    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div></div>`;
-  }
-  const list = state.incidents.incidents || [];
-  if (!list.length) {
-    return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div></div>`;
-  }
+const STARTUP_LOCATIONS = { RegistryRunUser: "Démarrage (utilisateur)", RegistryRunMachine: "Démarrage (système)", StartupFolder: "Dossier démarrage", ScheduledTask: "Tâche planifiée" };
+function renderStartup() {
+  const s = state.startup;
+  const wrap = (inner) => `<div class="card">${cardHead("Démarrage & tâches automatiques", C.warn)}${inner}</div>`;
+  if (s === null) return wrap(`<div class="empty" style="margin-top:2px"><span class="spinner-sm"></span> Lecture des programmes au démarrage…</div>`);
+  if (!s.supported) return wrap(`<div class="empty" style="margin-top:2px">Disponible sur Windows uniquement.</div>`);
+  const explainer = `<p style="margin:0 0 14px;font-size:12.5px;color:#5e6a7b">Ces programmes se lancent tout seuls (ouverture de session ou planning). Une <strong style="color:#8b97a8">fenêtre blanche qui apparaît puis disparaît + un freeze</strong> vient souvent d'un updater ou d'une tâche ici. Ceux marqués <span style="color:${C.bad}">« lié à un plantage »</span> correspondent à un programme vu « ne répond plus » récemment — les meilleurs suspects.</p>`;
+  const entries = (s.entries || []).slice().sort((a, b) => (b.linkedToHang ? 1 : 0) - (a.linkedToHang ? 1 : 0));
+  if (!entries.length) return wrap(`${explainer}<div style="font-size:13px;color:#5e6a7b">Aucun programme tiers au démarrage détecté.</div>`);
+  const rows = entries.map((e) => {
+    const flagged = e.linkedToHang;
+    const loc = STARTUP_LOCATIONS[e.location] || e.location;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #1b222d${flagged ? `;border-left:3px solid ${C.bad};padding-left:12px` : ""}">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:13.5px;color:${flagged ? C.bad : "#e7ecf3"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.name)}</span>${flagged ? `<span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:${C.bad};border:1px solid ${C.bad};border-radius:4px;padding:1px 5px">lié à un plantage</span>` : ""}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:#5e6a7b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px">${esc(e.command)}</div>
+      </div>
+      <span style="font-family:var(--mono);font-size:10.5px;color:#8b97a8;flex:none">${esc(loc)}</span>
+    </div>`;
+  }).join("");
+  return wrap(`${explainer}<div>${rows}</div>
+    <div style="font-size:11.5px;color:#5e6a7b;margin-top:12px">Pour agir aujourd'hui : Gestionnaire des tâches → onglet Démarrage, ou le Planificateur de tâches. La désactivation guidée depuis Perfoptimize arrivera avec le mode « corrections ».</div>`);
+}
 
+function viewIncidents() {
+  const lead = `<p class="lead">Post-mortem en lecture seule : Perfoptimize lit l'historique d'événements de Windows (14 derniers jours) et explique chaque incident — crash, écran bleu, plantage GPU, arrêt inattendu — avec sa cause probable et une solution. Plus bas, tout ce qui démarre automatiquement, pour traquer le programme d'arrière-plan qui fige le PC. Rien n'est modifié.</p>`;
+  const H = head("07 — Incidents & démarrage", "Plantages & programmes au démarrage");
+  let incidentsBlock;
+  if (state.incidents === null) {
+    incidentsBlock = `<div class="empty"><span class="spinner-sm"></span> Lecture de l'historique d'incidents…</div>`;
+  } else if (!state.incidents.supported) {
+    incidentsBlock = `<div class="empty">Le diagnostic d'incidents s'appuie sur le journal d'événements Windows — disponible uniquement sur Windows.</div>`;
+  } else if (!(state.incidents.incidents || []).length) {
+    incidentsBlock = `<div class="empty" style="color:${C.good}">✓ Aucun incident détecté sur les 14 derniers jours. Système stable.</div>`;
+  } else {
+    incidentsBlock = renderIncidentCards(state.incidents.incidents);
+  }
+  return `<div class="view">${H}${lead}${incidentsBlock}${renderStartup()}</div>`;
+}
+
+function renderIncidentCards(list) {
   // summary chips by kind
   const counts = {};
   for (const i of list) counts[i.kind] = (counts[i.kind] || 0) + 1;
@@ -918,10 +946,8 @@ function viewIncidents() {
     </div>`;
   }).join("");
 
-  return `<div class="view">${head("07 — Incidents & diagnostic", "D'où viennent les plantages")}${lead}
-    <div style="display:flex;flex-wrap:wrap;gap:10px">${summary}</div>
-    <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>
-  </div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:10px">${summary}</div>
+    <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>`;
 }
 
 // ============================================================================
@@ -973,6 +999,7 @@ function setView(v) {
   if (v === "hardware" && !state.hardware) loadHardware();
   if (v === "analyse" && state.settingsGuide === null) loadSettingsGuide();
   if (v === "incidents" && state.incidents === null) loadIncidents();
+  if (v === "incidents" && state.startup === null) loadStartup();
   if (v === "reseau" && state.network === null) loadNetwork();
   if (v === "tools" && !state.tools) loadTools();
   render();
@@ -1055,6 +1082,11 @@ async function loadLibrary() {
 async function loadIncidents() {
   try { state.incidents = await getJson("/api/incidents"); }
   catch { state.incidents = { supported: false, incidents: [] }; }
+  if (state.view === "incidents") render();
+}
+async function loadStartup() {
+  try { state.startup = await getJson("/api/startup"); }
+  catch { state.startup = { supported: false, entries: [], hangs: [] }; }
   if (state.view === "incidents") render();
 }
 

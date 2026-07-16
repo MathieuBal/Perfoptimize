@@ -2,6 +2,7 @@ using Perfoptimize.Core.Diagnostics;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Live;
 using Perfoptimize.Core.Network;
+using Perfoptimize.Core.Startup;
 
 namespace Perfoptimize.App.Endpoints;
 
@@ -96,6 +97,42 @@ internal static class LiveDiagnosticsEndpoints
                     i.LikelyCause,
                     i.SuggestedFix,
                 }),
+            });
+        });
+
+        // Startup: what auto-runs (logon + scheduled tasks), flagged against
+        // processes seen "not responding"/crashing recently — the flashing-window
+        // + freeze culprit usually lives here.
+        app.MapGet("/api/startup", () =>
+        {
+            if (!OperatingSystem.IsWindows())
+                return Results.Json(new { supported = false, entries = Array.Empty<object>(), hangs = Array.Empty<string>() });
+
+            var entries = new StartupScanner().Scan();
+
+            var records = new WindowsEventLogReader().ReadRecent(TimeSpan.FromDays(14));
+            var hangProcesses = IncidentClassifier.ClassifyAll(records)
+                .Where(i => i.Kind is IncidentKind.AppHang or IncidentKind.AppCrash)
+                .Select(i => i.Process)
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p!.ToLowerInvariant())
+                .Distinct()
+                .ToList();
+
+            foreach (var entry in entries)
+            {
+                var command = entry.Command.ToLowerInvariant();
+                entry.LinkedToHang = hangProcesses.Any(p => command.Contains(p));
+            }
+
+            return Results.Json(new
+            {
+                supported = true,
+                entries = entries.Select(e => new
+                {
+                    e.Name, e.Command, location = e.Location.ToString(), e.Detail, e.LinkedToHang,
+                }),
+                hangs = hangProcesses,
             });
         });
     }

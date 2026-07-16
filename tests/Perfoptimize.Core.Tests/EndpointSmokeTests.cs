@@ -35,6 +35,7 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     [InlineData("/api/library")]
     [InlineData("/api/network")]
     [InlineData("/api/incidents")]
+    [InlineData("/api/startup")]
     [InlineData("/api/tools")]
     [InlineData("/api/settings-guide")]
     public async Task Endpoint_responds_successfully(string url)
