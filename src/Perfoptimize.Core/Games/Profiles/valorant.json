@@ -1,0 +1,20 @@
+{
+  "name": "VALORANT",
+  "executables": ["VALORANT-Win64-Shipping.exe"],
+  "upscalers": [],
+  "advisories": [
+    {
+      "setting": "Détail de l'interface (UI Quality) élevé",
+      "kind": "poorValue",
+      "recommendation": "Sans impact visuel utile, à laisser bas",
+      "detail": "VALORANT est déjà très léger ; monter les détails n'apporte rien en compétition et peut coûter quelques FPS sur des configs modestes.",
+      "evidence": "communityValidated"
+    }
+  ],
+  "settings": [
+    { "name": "Anti-Aliasing (MSAA)", "impact": "gpu", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 8 },
+    { "name": "Anisotropic Filtering", "impact": "gpu", "qualityLoss": 1, "performanceGain": 1, "estimatedGainPercent": 3 },
+    { "name": "Detail Quality", "impact": "gpu", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 6 },
+    { "name": "Bloom / Distortion", "impact": "gpu", "qualityLoss": 0, "performanceGain": 1, "estimatedGainPercent": 2 }
+  ]
+}

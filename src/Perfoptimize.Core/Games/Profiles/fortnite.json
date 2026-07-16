@@ -1,0 +1,21 @@
+{
+  "name": "Fortnite",
+  "executables": ["FortniteClient-Win64-Shipping.exe"],
+  "upscalers": ["dlss", "fsr", "xess"],
+  "advisories": [
+    {
+      "setting": "Ray Tracing / Lumen matériel",
+      "kind": "poorValue",
+      "recommendation": "Désactiver en compétition",
+      "detail": "Lumen et le ray tracing matériel coûtent énormément de FPS. En mode compétitif, la lisibilité et la fluidité priment — à réserver au solo sur carte puissante.",
+      "evidence": "communityValidated"
+    }
+  ],
+  "settings": [
+    { "name": "View Distance", "impact": "mixed", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 6 },
+    { "name": "Shadows", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 10 },
+    { "name": "Post Processing", "impact": "gpu", "qualityLoss": 1, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Effects", "impact": "gpu", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Nanite Virtualized Geometry", "impact": "gpu", "qualityLoss": 3, "performanceGain": 3, "estimatedGainPercent": 10 }
+  ]
+}
