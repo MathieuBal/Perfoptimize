@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -65,5 +66,28 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var json = await _factory.CreateClient().GetStringAsync("/api/incidents");
         Assert.Contains("incidents", json);
+    }
+
+    [Fact]
+    public async Task Startup_disable_is_a_no_op_preview_without_confirmation()
+    {
+        // The prudent contract: a disable request without confirm must never act.
+        // Off Windows it is refused outright; either way it responds 200 with a
+        // JSON body and never 500s.
+        var client = _factory.CreateClient();
+        using var response = await client.PostAsJsonAsync(
+            "/api/startup/disable", new { id = "deadbeefdeadbeef", confirm = false });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("ok", body);
+    }
+
+    [Fact]
+    public async Task Startup_restore_responds_safely_for_an_unknown_id()
+    {
+        var client = _factory.CreateClient();
+        using var response = await client.PostAsJsonAsync(
+            "/api/startup/restore", new { id = "deadbeefdeadbeef" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 }

@@ -28,4 +28,7 @@ public sealed class StartupEntry
     public string? Detail { get; init; }
     /// <summary>Set when this entry matches a process seen "not responding" recently.</summary>
     public bool LinkedToHang { get; set; }
+
+    /// <summary>Stable id used to disable / restore this entry from the UI.</summary>
+    public string Id => StartupIdentity.Compute(Location, Name, Command);
 }

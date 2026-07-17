@@ -636,10 +636,13 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
   elle est indépendante de la section affichée, mais ne survit pas à la
   fermeture du processus (un mode service Windows / tâche planifiée reste à
   faire) ;
-- **L'application conseille, elle n'automatise pas encore les corrections
-  système** (nettoyage, plan d'alimentation, arrêt d'un processus parasite,
-  installation d'outils au-delà de PresentMon) — hors l'écriture de config
-  qui, elle, est prévisualisée, sauvegardée et confirmée ;
+- **Les corrections système actionnables démarrent, au niveau « prudent »** :
+  la première est *désactiver un programme au démarrage* (clé Run du registre,
+  dossier Démarrage ou tâche planifiée) — proposée, prévisualisée, **sauvegardée
+  puis appliquée seulement après confirmation**, et réversible d'un clic
+  (« Réactiver »). Rien n'est jamais modifié en silence. Les autres corrections
+  (nettoyage de caches, plan d'alimentation, arrêt d'un processus parasite)
+  restent à faire sur le même modèle ;
 - **Interface en français uniquement**, thème sombre unique, couleur
   porteuse d'information (rouge/vert) — internationalisation et accessibilité
   restent à faire ;
@@ -650,9 +653,9 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
 1. Validation sur plusieurs vraies machines Windows (compteurs GPU réels,
    PresentMon, WMI, `netstat`, journal d'événements, multi-GPU) ;
 2. Tests d'intégration des endpoints + tests frontend (harness navigateur en CI) ;
-3. Passer de « conseille » à « agit » : corrections système actionnables
-   (nettoyage caches, TRIM, plan d'alimentation, arrêt de processus parasite),
-   toujours avec prévisualisation + sauvegarde + confirmation ;
+3. Étendre les corrections actionnables (désactivation au démarrage déjà en
+   place) : nettoyage caches, TRIM, plan d'alimentation, arrêt de processus
+   parasite — toujours avec prévisualisation + sauvegarde + confirmation ;
 4. Surveillance qui survit à la fermeture (service Windows / tâche planifiée) ;
 5. Écriture JSON/XML (Cyberpunk 2077, GTA V), plus de profils de jeux, et
    mapping glossaire ↔ réglages du jeu affiché en direct ;

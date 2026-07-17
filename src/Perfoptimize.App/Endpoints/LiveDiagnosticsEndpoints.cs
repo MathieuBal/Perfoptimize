@@ -106,7 +106,7 @@ internal static class LiveDiagnosticsEndpoints
         app.MapGet("/api/startup", () =>
         {
             if (!OperatingSystem.IsWindows())
-                return Results.Json(new { supported = false, entries = Array.Empty<object>(), hangs = Array.Empty<string>() });
+                return Results.Json(new { supported = false, entries = Array.Empty<object>(), hangs = Array.Empty<string>(), disabled = Array.Empty<object>() });
 
             var entries = new StartupScanner().Scan();
 
@@ -125,14 +125,21 @@ internal static class LiveDiagnosticsEndpoints
                 entry.LinkedToHang = hangProcesses.Any(p => command.Contains(p));
             }
 
+            var disabled = new StartupBackupStore(StartupBackupStore.DefaultDirectory()).List();
+
             return Results.Json(new
             {
                 supported = true,
                 entries = entries.Select(e => new
                 {
-                    e.Name, e.Command, location = e.Location.ToString(), e.Detail, e.LinkedToHang,
+                    e.Id, e.Name, e.Command, location = e.Location.ToString(), e.Detail, e.LinkedToHang,
                 }),
                 hangs = hangProcesses,
+                disabled = disabled.Select(b => new
+                {
+                    b.Id, b.Name, location = b.Location.ToString(), method = b.Method.ToString(),
+                    disabledAt = b.DisabledAt.ToString("o"),
+                }),
             });
         });
     }

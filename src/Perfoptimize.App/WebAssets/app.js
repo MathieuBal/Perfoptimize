@@ -40,6 +40,9 @@ const state = {
   games: null, hardware: null, tools: null, system: null,
   library: null, libConfigs: {}, lastReport: null, incidents: null, live: null, network: null,
   alerts: [], settingsGuide: null, startup: null,
+  // Prudent automation: one startup action in flight at a time.
+  // { id, phase: "preview"|"working"|"done", plan, ok, msg }
+  startupAction: null,
 };
 
 let countdownTimer = null;
@@ -881,20 +884,58 @@ function renderStartup() {
   if (!s.supported) return wrap(`<div class="empty" style="margin-top:2px">Disponible sur Windows uniquement.</div>`);
   const explainer = `<p style="margin:0 0 14px;font-size:12.5px;color:#5e6a7b">Ces programmes se lancent tout seuls (ouverture de session ou planning). Une <strong style="color:#8b97a8">fenêtre blanche qui apparaît puis disparaît + un freeze</strong> vient souvent d'un updater ou d'une tâche ici. Ceux marqués <span style="color:${C.bad}">« lié à un plantage »</span> correspondent à un programme vu « ne répond plus » récemment — les meilleurs suspects.</p>`;
   const entries = (s.entries || []).slice().sort((a, b) => (b.linkedToHang ? 1 : 0) - (a.linkedToHang ? 1 : 0));
-  if (!entries.length) return wrap(`${explainer}<div style="font-size:13px;color:#5e6a7b">Aucun programme tiers au démarrage détecté.</div>`);
+  const disabled = s.disabled || [];
+  if (!entries.length && !disabled.length) return wrap(`${explainer}<div style="font-size:13px;color:#5e6a7b">Aucun programme tiers au démarrage détecté.</div>`);
+  const act = state.startupAction;
   const rows = entries.map((e) => {
     const flagged = e.linkedToHang;
     const loc = STARTUP_LOCATIONS[e.location] || e.location;
-    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #1b222d${flagged ? `;border-left:3px solid ${C.bad};padding-left:12px` : ""}">
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:13.5px;color:${flagged ? C.bad : "#e7ecf3"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.name)}</span>${flagged ? `<span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:${C.bad};border:1px solid ${C.bad};border-radius:4px;padding:1px 5px">lié à un plantage</span>` : ""}</div>
-        <div style="font-family:var(--mono);font-size:11px;color:#5e6a7b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px">${esc(e.command)}</div>
+    const mine = act && act.id === e.id;
+    const btn = mine
+      ? `<span style="font-family:var(--mono);font-size:10.5px;color:#8b97a8;flex:none"><span class="spinner-sm"></span></span>`
+      : `<button class="btn" style="flex:none;padding:7px 12px;font-size:11.5px" data-action="startup-disable" data-id="${esc(e.id)}">Désactiver</button>`;
+    const panel = (mine && (act.phase === "preview" || act.phase === "done"))
+      ? renderStartupActionPanel(act) : "";
+    return `<div style="padding:10px 0;border-bottom:1px solid #1b222d${flagged ? `;border-left:3px solid ${C.bad};padding-left:12px` : ""}">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:13.5px;color:${flagged ? C.bad : "#e7ecf3"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.name)}</span>${flagged ? `<span style="font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:${C.bad};border:1px solid ${C.bad};border-radius:4px;padding:1px 5px">lié à un plantage</span>` : ""}</div>
+          <div style="font-family:var(--mono);font-size:11px;color:#5e6a7b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px">${esc(e.command)}</div>
+        </div>
+        <span style="font-family:var(--mono);font-size:10.5px;color:#8b97a8;flex:none">${esc(loc)}</span>
+        ${btn}
       </div>
-      <span style="font-family:var(--mono);font-size:10.5px;color:#8b97a8;flex:none">${esc(loc)}</span>
+      ${panel}
     </div>`;
   }).join("");
-  return wrap(`${explainer}<div>${rows}</div>
-    <div style="font-size:11.5px;color:#5e6a7b;margin-top:12px">Pour agir aujourd'hui : Gestionnaire des tâches → onglet Démarrage, ou le Planificateur de tâches. La désactivation guidée depuis Perfoptimize arrivera avec le mode « corrections ».</div>`);
+  const disabledBlock = disabled.length ? `<div style="margin-top:16px;padding-top:14px;border-top:1px solid #1b222d">
+    <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#5e6a7b;margin-bottom:8px">Désactivé par Perfoptimize — réactivable à tout moment</div>
+    ${disabled.map((d) => `<div style="display:flex;align-items:center;gap:12px;padding:8px 0">
+      <div style="flex:1;min-width:0"><span style="font-size:13px;color:#8b97a8">${esc(d.name)}</span> <span style="font-family:var(--mono);font-size:10.5px;color:#5e6a7b">${esc(STARTUP_LOCATIONS[d.location] || d.location)}</span></div>
+      <button class="btn" style="flex:none;padding:7px 12px;font-size:11.5px" data-action="startup-restore" data-id="${esc(d.id)}">Réactiver</button>
+    </div>`).join("")}
+  </div>` : "";
+  return wrap(`${explainer}<div>${rows}</div>${disabledBlock}
+    <div style="font-size:11.5px;color:#5e6a7b;margin-top:12px">Rien n'est modifié sans ta confirmation : « Désactiver » montre d'abord ce qui va se passer, écrit une sauvegarde, puis attend ton accord. « Réactiver » remet tout à l'identique. Les entrées système et tâches planifiées peuvent demander de lancer Perfoptimize en administrateur.</div>`);
+}
+
+// The inline preview / result panel for the entry currently being acted on.
+function renderStartupActionPanel(act) {
+  if (act.phase === "done") {
+    const col = act.ok ? C.good : C.bad;
+    return `<div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#12171e;border:1px solid #1b222d;font-size:12.5px;color:${col}">${act.ok ? "✓ " : "✗ "}${esc(act.msg || "")}</div>`;
+  }
+  const p = act.plan || {};
+  const elev = p.needsElevation ? `<div style="font-size:11.5px;color:${C.warn};margin-top:6px">⚠ Peut nécessiter les droits administrateur.</div>` : "";
+  return `<div style="margin-top:10px;padding:12px 14px;border-radius:8px;background:#12171e;border:1px solid #263143">
+    <div style="font-size:12.5px;color:#c9d3df;margin-bottom:6px"><strong>Ce qui va se passer :</strong> ${esc(p.action || "")}</div>
+    <div style="font-size:12px;color:#8b97a8">Réversible — ${esc(p.reversal || "")}</div>
+    ${elev}
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-primary" style="padding:8px 16px;font-size:12.5px" data-action="startup-confirm" data-id="${esc(act.id)}">Confirmer la désactivation</button>
+      <button class="btn" style="padding:8px 16px;font-size:12.5px" data-action="startup-cancel">Annuler</button>
+    </div>
+  </div>`;
 }
 
 function viewIncidents() {
@@ -1086,7 +1127,7 @@ async function loadIncidents() {
 }
 async function loadStartup() {
   try { state.startup = await getJson("/api/startup"); }
-  catch { state.startup = { supported: false, entries: [], hangs: [] }; }
+  catch { state.startup = { supported: false, entries: [], hangs: [], disabled: [] }; }
   if (state.view === "incidents") render();
 }
 
@@ -1257,6 +1298,44 @@ async function doRestore() {
   render();
 }
 
+// ---- Startup automation (prudent: propose → preview → confirm → restore) ----
+async function startupPreviewDisable(id) {
+  state.startupAction = { id, phase: "working", plan: null, ok: false, msg: "" };
+  render();
+  try {
+    const r = await postJson("/api/startup/disable", { id, confirm: false });
+    if (r.ok && r.preview) state.startupAction = { id, phase: "preview", plan: r.plan, ok: false, msg: "" };
+    else state.startupAction = { id, phase: "done", plan: r.plan, ok: false, msg: r.message || "Impossible de préparer l'action." };
+  } catch (e) { state.startupAction = { id, phase: "done", ok: false, msg: e.message }; }
+  render();
+}
+async function startupConfirmDisable(id) {
+  state.startupAction = { id, phase: "working", plan: state.startupAction && state.startupAction.plan, ok: false, msg: "" };
+  render();
+  try {
+    const r = await postJson("/api/startup/disable", { id, confirm: true });
+    if (r.ok) { await refreshStartup(); state.startupAction = null; } // entry now shows in "Désactivé"
+    else state.startupAction = { id, phase: "done", plan: r.plan, ok: false, msg: r.message || "" };
+  } catch (e) { state.startupAction = { id, phase: "done", ok: false, msg: e.message }; }
+  render();
+}
+function startupCancel() { state.startupAction = null; render(); }
+async function startupRestore(id) {
+  state.startupAction = { id, phase: "working", ok: false, msg: "" };
+  render();
+  try {
+    const r = await postJson("/api/startup/restore", { id });
+    state.startupAction = null;
+    if (r.ok) await refreshStartup();
+    else { state.startupAction = { id, phase: "done", ok: false, msg: r.message || "Échec de la réactivation." }; }
+  } catch (e) { state.startupAction = { id, phase: "done", ok: false, msg: e.message }; }
+  render();
+}
+// Reload the startup list (entries + disabled), keeping any result panel intact.
+async function refreshStartup() {
+  try { state.startup = await getJson("/api/startup"); } catch { /* keep last */ }
+}
+
 // ---- Tools -----------------------------------------------------------------
 async function installPresentMon() {
   const btn = $("install-pm");
@@ -1293,6 +1372,10 @@ $("content").addEventListener("click", (e) => {
     case "install-pm": installPresentMon(); break;
     case "rescan-library": state.library = null; state.libConfigs = {}; state.openConfig = null; render(); loadLibrary(); break;
     case "rescan-network": state.network = null; render(); loadNetwork(); break;
+    case "startup-disable": startupPreviewDisable(a.dataset.id); break;
+    case "startup-confirm": startupConfirmDisable(a.dataset.id); break;
+    case "startup-cancel": startupCancel(); break;
+    case "startup-restore": startupRestore(a.dataset.id); break;
     case "toggle-config": {
       const idx = parseInt(a.dataset.idx, 10);
       if (state.openConfig === idx) { state.openConfig = null; render(); }
