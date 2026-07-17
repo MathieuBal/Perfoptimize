@@ -2,6 +2,11 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Perfoptimize.App;
 using Perfoptimize.App.Endpoints;
+using Velopack;
+
+// Must run first: handles the Velopack install/update hooks and returns
+// immediately in normal use (and when running from source). See UpdateService.
+VelopackApp.Build().Run();
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders(); // a desktop tool should not spam the console
@@ -23,6 +28,7 @@ app.MapLiveDiagnosticsEndpoints();// live monitor, network, incidents
 app.MapToolsEndpoints();          // PresentMon status + install
 app.MapOptimizationEndpoints();   // preview / apply / restore config
 app.MapAutomationEndpoints();     // prudent actions: disable / restore startup entries
+app.MapUpdateEndpoints();         // check GitHub Releases + apply update on request
 
 // ----- Launch: print the URL and open the browser ----------------------------
 app.Lifetime.ApplicationStarted.Register(() =>

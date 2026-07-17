@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Perfoptimize.Core\Perfoptimize.Core.csproj" />
+    <!-- Installer + auto-update (Velopack). Keep in lock-step with the vpk CLI
+         version used by .github/workflows/release.yml. -->
+    <PackageReference Include="Velopack" Version="1.1.1" />
   </ItemGroup>
 
   <PropertyGroup>

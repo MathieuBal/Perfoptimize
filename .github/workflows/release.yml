@@ -1,0 +1,48 @@
+name: release
+
+# Cut a release by pushing a semver tag, e.g. `git tag v0.18.0 && git push origin v0.18.0`.
+# This publishes a self-contained Windows build, packs it with Velopack (installer
+# + delta update package) and uploads everything to the GitHub Release for the tag.
+# The installed app then auto-detects that release via /api/update.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Derive version from tag
+        id: version
+        shell: pwsh
+        run: echo "value=$($env:GITHUB_REF_NAME.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+
+      - name: Publish self-contained (win-x64)
+        run: dotnet publish src/Perfoptimize.App/Perfoptimize.App.csproj -c Release -r win-x64 --self-contained true -o publish
+
+      - name: Install Velopack CLI (vpk)
+        run: |
+          dotnet tool install -g vpk --version 1.1.1
+          echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+
+      - name: Download the previous release (for delta updates)
+        continue-on-error: true # the very first release has nothing to diff against
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack the release with Velopack
+        run: vpk pack --packId Perfoptimize --packVersion ${{ steps.version.outputs.value }} --packDir publish --mainExe Perfoptimize.exe --packTitle Perfoptimize
+
+      - name: Upload to the GitHub Release
+        run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --publish --releaseName "Perfoptimize ${{ steps.version.outputs.value }}" --tag ${{ github.ref_name }} --token ${{ secrets.GITHUB_TOKEN }}

@@ -648,6 +648,22 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
   restent à faire ;
 - **Pas encore de tests frontend / end-to-end** ni de fichier de licence.
 
+### Installation & mises à jour
+
+L'application se distribue en **installeur Windows avec auto-update**, via
+[Velopack](https://velopack.io) et les GitHub Releases :
+
+- **Publier une version** : pousser un tag semver (`git tag v0.18.0 && git push
+  origin v0.18.0`). Le workflow `.github/workflows/release.yml` publie un build
+  autonome `win-x64`, le empaquette avec Velopack (installeur `Setup.exe` +
+  paquets de mise à jour delta) et téléverse le tout sur la Release du tag.
+- **Côté application** : au démarrage, `/api/update` interroge les Releases ;
+  si une version plus récente existe, un bandeau « Mise à jour disponible »
+  apparaît. **Rien n'est téléchargé sans action de l'utilisateur** — le bouton
+  « Mettre à jour » télécharge puis redémarre sur la nouvelle version (même
+  principe prudent que le reste de l'app). En développement (build non
+  installé), la vérification se désactive proprement.
+
 ### Prochaines étapes
 
 1. Validation sur plusieurs vraies machines Windows (compteurs GPU réels,
@@ -659,6 +675,7 @@ Un outil de diagnostic doit être honnête sur ce qu'il ne sait pas encore faire
 4. Surveillance qui survit à la fermeture (service Windows / tâche planifiée) ;
 5. Écriture JSON/XML (Cyberpunk 2077, GTA V), plus de profils de jeux, et
    mapping glossaire ↔ réglages du jeu affiché en direct ;
-6. Licence, binaire signé, auto-update et artefacts de release en CI ;
+6. Licence et binaire signé (l'installeur Windows + l'auto-update via Velopack
+   et GitHub Releases sont en place, voir « Installation & mises à jour ») ;
 7. Internationalisation (FR/EN) et passe d'accessibilité (clavier, contraste,
    `prefers-reduced-motion`).

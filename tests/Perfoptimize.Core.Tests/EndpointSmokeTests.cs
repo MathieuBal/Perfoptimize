@@ -39,6 +39,7 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     [InlineData("/api/startup")]
     [InlineData("/api/tools")]
     [InlineData("/api/settings-guide")]
+    [InlineData("/api/update")]
     public async Task Endpoint_responds_successfully(string url)
     {
         var client = _factory.CreateClient();
@@ -89,5 +90,23 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
         using var response = await client.PostAsJsonAsync(
             "/api/startup/restore", new { id = "deadbeefdeadbeef" });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Update_check_reports_not_installed_when_running_from_tests()
+    {
+        // Running under the test host is not a Velopack-installed build, so the
+        // check must short-circuit to installed:false without hitting the network.
+        var json = await _factory.CreateClient().GetStringAsync("/api/update");
+        Assert.Contains("\"installed\":false", json.ToLowerInvariant().Replace(" ", ""));
+    }
+
+    [Fact]
+    public async Task Update_apply_is_refused_when_not_installed()
+    {
+        using var response = await _factory.CreateClient().PostAsJsonAsync("/api/update/apply", new { });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"ok\":false", body.ToLowerInvariant().Replace(" ", ""));
     }
 }

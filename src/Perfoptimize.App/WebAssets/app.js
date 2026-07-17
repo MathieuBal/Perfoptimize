@@ -43,6 +43,8 @@ const state = {
   // Prudent automation: one startup action in flight at a time.
   // { id, phase: "preview"|"working"|"done", plan, ok, msg }
   startupAction: null,
+  // Self-update (Velopack): { installed, available, currentVersion, newVersion }
+  update: null, updateApplying: false, updateMsg: "",
 };
 
 let countdownTimer = null;
@@ -1016,7 +1018,7 @@ function render() {
     chip.textContent = pm.installed ? "PresentMon ✓" : "PresentMon · non installé";
   }
 
-  $("content").innerHTML = (VIEWS[state.view] || viewOverview)();
+  $("content").innerHTML = renderUpdateBanner() + (VIEWS[state.view] || viewOverview)();
 
   // chart is drawn after markup is in the DOM
   if (state.view === "analyse" && state.monitorPhase === "done" && state.lastReport
@@ -1030,6 +1032,22 @@ function render() {
       chartResizeBound = true;
     }
   }
+}
+
+// A dismiss-free update prompt shown above every view when a newer release
+// exists. Nothing downloads until "Mettre à jour" is pressed (prudent).
+function renderUpdateBanner() {
+  const u = state.update;
+  if (!u || !u.available) return "";
+  const applying = state.updateApplying;
+  return `<div style="margin:0 0 18px;padding:14px 18px;border-radius:12px;border:1px solid ${C.good};background:color-mix(in srgb, ${C.good} 10%, transparent);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:14px;color:#e7ecf3">Mise à jour disponible — <strong>v${esc(u.newVersion || "")}</strong> <span style="color:#5e6a7b">(actuelle v${esc(u.currentVersion || "")})</span></div>
+      <div style="font-size:12px;color:#8b97a8;margin-top:2px">Rien n'est téléchargé sans ton accord. Au clic, l'app télécharge la mise à jour et redémarre dessus.</div>
+      ${state.updateMsg ? `<div style="font-size:12px;color:${C.warn};margin-top:6px">${esc(state.updateMsg)}</div>` : ""}
+    </div>
+    <button class="btn-primary" data-action="do-update"${applying ? " disabled" : ""}>${applying ? '<span class="spinner-sm"></span> Mise à jour…' : "Mettre à jour"}</button>
+  </div>`;
 }
 
 function setView(v) {
@@ -1217,6 +1235,18 @@ function updateAlertChip() {
 async function loadVersion() {
   try { const v = await getJson("/api/version"); $("version").textContent = `· v${v.version}`; } catch { /* non-essential */ }
 }
+async function loadUpdate() {
+  // Only meaningful on an installed build; in dev it reports installed:false.
+  try { state.update = await getJson("/api/update"); if (state.update && state.update.available) render(); } catch { /* offline / non-essential */ }
+}
+async function doUpdate() {
+  state.updateApplying = true; state.updateMsg = ""; render();
+  try {
+    const r = await postJson("/api/update/apply", {});
+    // On success the process restarts and this page drops its connection.
+    if (!r.ok) { state.updateApplying = false; state.updateMsg = r.message || "Échec de la mise à jour."; render(); }
+  } catch { state.updateMsg = "L'app redémarre sur la nouvelle version…"; render(); }
+}
 function updateTopbar() {
   const g = state.games && state.games.running;
   $("topbar-game").textContent = g ? g.name : "Aucun jeu";
@@ -1376,6 +1406,7 @@ $("content").addEventListener("click", (e) => {
     case "startup-confirm": startupConfirmDisable(a.dataset.id); break;
     case "startup-cancel": startupCancel(); break;
     case "startup-restore": startupRestore(a.dataset.id); break;
+    case "do-update": doUpdate(); break;
     case "toggle-config": {
       const idx = parseInt(a.dataset.idx, 10);
       if (state.openConfig === idx) { state.openConfig = null; render(); }
@@ -1415,5 +1446,6 @@ loadGames();
 loadHardware();
 loadTools();
 loadVersion();
+loadUpdate();       // surface a new release if one is available
 startGlobalLive(); // continuous, from every view
 
