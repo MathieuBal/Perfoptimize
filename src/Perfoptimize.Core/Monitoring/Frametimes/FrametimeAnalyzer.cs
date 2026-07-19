@@ -17,6 +17,12 @@ public sealed class FrametimeStatistics
     public int StutterCount { get; init; }
     /// <summary>Share of frames that are stutters, from 0 to 100.</summary>
     public double StutterPercent { get; init; }
+    /// <summary>
+    /// Instantaneous FPS over time, downsampled to at most ~120 points so the UI
+    /// can draw the real frametime curve (spikes included) without shipping every
+    /// frame. Empty when there were too few frames to be meaningful.
+    /// </summary>
+    public IReadOnlyList<double> FpsSeries { get; init; } = [];
 }
 
 public static class FrametimeAnalyzer
@@ -50,7 +56,36 @@ public static class FrametimeAnalyzer
             AverageFrametimeMs = Math.Round(average, 2),
             StutterCount = stutters,
             StutterPercent = Math.Round(100.0 * stutters / valid.Count, 2),
+            FpsSeries = DownsampledFpsSeries(valid),
         };
+    }
+
+    /// <summary>
+    /// Reduces the per-frame series to at most <paramref name="maxPoints"/> points
+    /// by averaging frame times within each bucket, then converting to FPS — so
+    /// stutters flatten a little but the shape (and dips) survive for plotting.
+    /// </summary>
+    private static IReadOnlyList<double> DownsampledFpsSeries(List<double> frametimesMs, int maxPoints = 120)
+    {
+        if (frametimesMs.Count < 4)
+            return [];
+        if (frametimesMs.Count <= maxPoints)
+            return frametimesMs.Select(ms => Math.Round(1000.0 / ms, 1)).ToList();
+
+        var bucketSize = (double)frametimesMs.Count / maxPoints;
+        var series = new List<double>(maxPoints);
+        for (var i = 0; i < maxPoints; i++)
+        {
+            var start = (int)(i * bucketSize);
+            var end = (int)((i + 1) * bucketSize);
+            if (end <= start) end = start + 1;
+            if (end > frametimesMs.Count) end = frametimesMs.Count;
+            double sum = 0;
+            for (var j = start; j < end; j++)
+                sum += frametimesMs[j];
+            series.Add(Math.Round(1000.0 / (sum / (end - start)), 1));
+        }
+        return series;
     }
 
     private static double Median(List<double> values)

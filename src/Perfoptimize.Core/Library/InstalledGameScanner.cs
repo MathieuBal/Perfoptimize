@@ -181,11 +181,70 @@ public sealed class InstalledGameScanner
         return Path.Combine(programData, "Epic", "EpicGamesLauncher", "Data", "Manifests");
     }
 
+    /// <summary>
+    /// Games that ship their OWN launcher (not Steam/Epic) and so leave no
+    /// manifest to read — we find them by probing their known install folders on
+    /// every drive. Path of Exile 2 is the motivating case: standalone, and
+    /// routinely installed off C:.
+    /// </summary>
+    private static readonly (string Name, string Folder)[] KnownStandaloneGames =
+    [
+        ("Path of Exile 2", "Path of Exile 2"),
+        ("Path of Exile", "Path of Exile"),
+    ];
+
+    /// <summary>
+    /// Probes each drive for the known standalone game folders under the usual
+    /// parents (root, Program Files, GGG's folder, a Games folder). Bounded — it
+    /// checks a fixed set of candidate paths, it does not walk the disk.
+    /// </summary>
+    public IReadOnlyList<InstalledGame> ScanStandaloneFolders(IEnumerable<string> driveRoots)
+    {
+        var games = new Dictionary<string, InstalledGame>(StringComparer.OrdinalIgnoreCase);
+        foreach (var drive in driveRoots)
+            foreach (var (name, folder) in KnownStandaloneGames)
+                foreach (var parent in StandaloneParents(drive))
+                {
+                    var dir = Path.Combine(parent, folder);
+                    if (Directory.Exists(dir))
+                        games[dir] = new InstalledGame { Name = name, InstallDir = dir, Source = GameSource.Folder };
+                }
+        return games.Values.ToList();
+    }
+
+    private static IEnumerable<string> StandaloneParents(string drive) =>
+    [
+        drive,
+        Path.Combine(drive, "Program Files (x86)", "Grinding Gear Games"),
+        Path.Combine(drive, "Program Files", "Grinding Gear Games"),
+        Path.Combine(drive, "Games"),
+        Path.Combine(drive, "Program Files (x86)"),
+        Path.Combine(drive, "Program Files"),
+    ];
+
+    /// <summary>
+    /// The concrete locations a full scan looks at (Steam roots, Epic manifests,
+    /// standalone parents per drive), so the UI can show WHERE it searched — and
+    /// the user can tell whether their disk was even covered.
+    /// </summary>
+    public static IReadOnlyList<string> InspectedLocations()
+    {
+        var locations = new List<string>();
+        locations.AddRange(DefaultSteamRoots());
+        locations.Add(DefaultEpicManifestsDir());
+        foreach (var drive in SafeFixedDriveRoots())
+            locations.AddRange(StandaloneParents(drive));
+        return locations.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>Scans every default location across all launchers and drives.</summary>
     public IReadOnlyList<InstalledGame> Scan()
     {
         var all = new Dictionary<string, InstalledGame>(StringComparer.OrdinalIgnoreCase);
-        foreach (var game in ScanSteam(DefaultSteamRoots()).Concat(ScanEpic(DefaultEpicManifestsDir())))
+        var drives = SafeFixedDriveRoots();
+        foreach (var game in ScanSteam(DefaultSteamRoots())
+                     .Concat(ScanEpic(DefaultEpicManifestsDir()))
+                     .Concat(ScanStandaloneFolders(drives)))
             all[game.InstallDir] = game;
         return all.Values.OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }

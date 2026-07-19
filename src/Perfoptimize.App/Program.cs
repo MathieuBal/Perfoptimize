@@ -73,6 +73,9 @@ app.MapGet("/api/library", () =>
     return Results.Json(new
     {
         games = games.Select(g => new { g.Name, g.InstallDir, source = g.Source.ToString(), g.AppId }),
+        // Show WHERE we looked (Steam roots on every drive, Epic, standalone
+        // folders) so the user can tell whether their disk was even covered.
+        inspected = InstalledGameScanner.InspectedLocations(),
     });
 });
 
@@ -156,7 +159,11 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         cpu = new { avg = summary.AverageCpuUsagePercent, busiestCore = summary.AverageMaxCoreUsagePercent, gameShare = summary.AverageGameCpuUsagePercent },
         gpu = new { avg = summary.AverageGpuUsagePercent, gameShare = summary.AverageGameGpuUsagePercent, tempC = summary.PeakGpuTemperatureC, clockMhz = summary.AverageGpuCoreClockMhz },
         memory = new { ram = summary.PeakRamUsagePercent, vram = summary.PeakVramUsagePercent },
-        fps = frametimes is null ? null : new { frametimes.AverageFps, frametimes.OnePercentLowFps, frametimes.StutterPercent },
+        fps = frametimes is null ? null : new
+        {
+            frametimes.AverageFps, frametimes.OnePercentLowFps, frametimes.StutterPercent,
+            frametimes.WorstFrametimeMs, series = frametimes.FpsSeries,
+        },
         bottleneck = new { type = analysis.Type.ToString(), confidence = analysis.Confidence.ToString(), analysis.Explanation },
         target = new { plan.TargetFps, plan.MeasuredAverageFps, plan.RequiredGainPercent, gainLow = plan.EstimatedGainLowPercent, gainHigh = plan.EstimatedGainHighPercent },
         recommendations = plan.Recommendations.Select(r => new
@@ -171,6 +178,7 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
         // alreadyOk / cannotVerify, high priority when it matches the bottleneck.
         advisories = plan.Advisories.Select(e => new
         {
+            id = e.Advisory.Id,
             setting = e.Advisory.Setting,
             kind = e.Advisory.Kind.ToString(),
             status = e.Status.ToString(),
@@ -189,12 +197,28 @@ app.MapPost("/api/monitor", async (MonitorRequest? request) =>
 // ----- Tools: PresentMon install from the UI ---------------------------------
 app.MapGet("/api/tools", () =>
 {
-    var path = PresentMonInstaller.FindInstalled();
+    var presentMonPath = PresentMonInstaller.FindInstalled();
     return Results.Json(new
     {
-        presentMon = new { installed = path is not null, path },
+        presentMon = new { installed = presentMonPath is not null, path = presentMonPath },
         platform = new { isWindows = OperatingSystem.IsWindows() },
+        // The curated catalog of relevant tools: PresentMon installs in-app, the
+        // rest link to their official download page.
+        catalog = ToolCatalog.All.Select(t => new
+        {
+            t.Id, t.Name, t.Purpose, t.Url, t.HasBuiltInInstaller,
+            installed = t.Id == "presentmon" && presentMonPath is not null,
+        }),
     });
+});
+
+// Open a catalog tool's OFFICIAL download page in the browser (only URLs we ship).
+app.MapPost("/api/tools/open", (ToolOpenRequest request) =>
+{
+    if (request.Id is null || ToolCatalog.Find(request.Id) is not { } tool)
+        return Results.Json(new { ok = false, message = "Outil inconnu." });
+    BrowserLauncher.Open(tool.Url);
+    return Results.Json(new { ok = true, url = tool.Url });
 });
 
 app.MapPost("/api/tools/presentmon", async (IHttpClientFactory factory) =>
@@ -298,6 +322,64 @@ app.MapPost("/api/restore", (RestoreRequest request) =>
         : new { ok = false, message = "Aucune sauvegarde à restaurer pour ce jeu." });
 });
 
+// ----- Advisories: preview / apply-and-verify a single community fix ----------
+app.MapPost("/api/advisory/apply", (AdvisoryApplyRequest request) =>
+{
+    var profiles = GameProfileRepository.LoadBuiltIn();
+    var game = profiles.FirstOrDefault(p =>
+                   p.Name.Contains(request.Game ?? "", StringComparison.OrdinalIgnoreCase)) ??
+               RunningGameDetector.Match(request.Game ?? "", profiles);
+    if (game is null || game.Advisories.Count == 0)
+        return Results.Json(new { ok = false, message = "Jeu inconnu ou sans advisories." });
+
+    // Evaluate against the ACTUAL config so we only ever apply a fix whose
+    // problem is genuinely present right now.
+    var configValues = ReadCurrentConfig(game);
+    var plan = RecommendationEngine.Advise(new AdviceRequest
+    {
+        Analysis = new BottleneckAnalysis { Type = BottleneckType.Gpu },
+        Game = game,
+        ConfigValues = configValues,
+    });
+    var triggered = plan.Advisories
+        .Where(a => a.Status == AdvisoryStatus.Triggered)
+        .Where(a => request.AdvisoryId is null || a.Advisory.Id == request.AdvisoryId)
+        .Select(a => a.Advisory)
+        .ToList();
+    if (triggered.Count == 0)
+        return Results.Json(new { ok = false, message = "Aucune advisory déclenchée à corriger dans la config actuelle." });
+
+    // Writing must never race the game rewriting its config on exit.
+    if (request.Write && new RunningGameDetector().Detect([game]) is { } running)
+        return Results.Json(new
+        {
+            ok = false,
+            message = $"{game.Name} est en cours d'exécution (pid {running.ProcessId}) — ferme le jeu avant d'appliquer.",
+        });
+
+    var applier = new AdvisoryApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
+    var result = applier.Apply(game, triggered, request.Write);
+    return Results.Json(new
+    {
+        ok = true,
+        game = game.Name,
+        written = result.Written,
+        changes = result.Changes.Select(c => new
+        {
+            advisoryId = c.Advisory.Id,
+            setting = c.Advisory.Setting,
+            status = c.Status.ToString(),
+            file = c.FilePath,
+            section = c.Section,
+            key = c.Key,
+            current = c.CurrentValue,
+            proposed = c.NewValue,
+            note = c.Note,
+        }),
+        backups = result.BackupPaths,
+    });
+});
+
 app.MapGet("/api/version", () => Results.Json(new
 {
     version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev",
@@ -354,3 +436,9 @@ internal sealed record ApplyRequest(string? Game, string? Bottleneck, string? Go
 
 /// <summary>Body of a restore request from the UI.</summary>
 internal sealed record RestoreRequest(string? Game);
+
+/// <summary>Body of an advisory preview/apply request from the UI.</summary>
+internal sealed record AdvisoryApplyRequest(string? Game, string? AdvisoryId, bool Write);
+
+/// <summary>Body of a request to open a catalog tool's download page.</summary>
+internal sealed record ToolOpenRequest(string? Id);
