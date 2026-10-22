@@ -44,9 +44,8 @@ internal static class OptimizationEndpoints
                 }
                 else
                 {
-                    // Current UI compatibility: the analysis page does not yet
-                    // post its session id, so select the newest session for this
-                    // exact game. No plan is ever recomputed as a fallback.
+                    // Compatibility for non-cockpit clients. The cockpit sends
+                    // the exact session id; no plan is ever recomputed here.
                     session = store.GetRecent(limit: 1, game.Name).FirstOrDefault();
                 }
             }
@@ -93,21 +92,58 @@ internal static class OptimizationEndpoints
                 });
 
             var applier = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
-            var result = applier.Apply(game, settings, request.Write);
+            ApplyResult result;
+            try
+            {
+                // A write from the cockpit is an exact frozen transaction at the
+                // planning boundary: if one config value changed since analysis,
+                // the whole plan is refused instead of applying only a subset.
+                result = applier.Apply(game, settings, request.Write, requireAllReady: request.Write);
+            }
+            catch
+            {
+                return Results.Json(new
+                {
+                    ok = false,
+                    sessionId = session.Id,
+                    game = game.Name,
+                    written = false,
+                    message = request.Write
+                        ? "L'application a échoué. Les fichiers déjà modifiés pendant cette tentative ont été restaurés depuis leurs sauvegardes."
+                        : "Impossible de relire la configuration pour prévisualiser ce plan.",
+                });
+            }
+
+            var changes = result.Changes.Select(c => new
+            {
+                setting = c.Setting.Name,
+                status = c.Status.ToString(),
+                note = c.Note,
+                current = c.CurrentValue,
+                proposed = c.NewValue,
+            }).ToList();
+
+            if (request.Write && !result.Written)
+            {
+                return Results.Json(new
+                {
+                    ok = false,
+                    sessionId = session.Id,
+                    game = game.Name,
+                    written = false,
+                    message = "La configuration a changé depuis l'analyse : aucune modification n'a été appliquée. Relance l'analyse pour obtenir un plan à jour.",
+                    changes,
+                    backups = Array.Empty<string>(),
+                });
+            }
+
             return Results.Json(new
             {
                 ok = true,
                 sessionId = session.Id,
                 game = game.Name,
                 written = result.Written,
-                changes = result.Changes.Select(c => new
-                {
-                    setting = c.Setting.Name,
-                    status = c.Status.ToString(),
-                    note = c.Note,
-                    current = c.CurrentValue,
-                    proposed = c.NewValue,
-                }),
+                changes,
                 backups = result.BackupPaths,
             });
         });
@@ -132,23 +168,90 @@ internal static class OptimizationEndpoints
                     message = $"{game.Name} est en cours d'exécution (pid {running.ProcessId}) — ferme le jeu avant de restaurer.",
                 });
 
-            var backups = new ConfigBackupService(ConfigBackupService.DefaultBackupRoot());
-            var restored = new List<string>();
+            var backupService = new ConfigBackupService(ConfigBackupService.DefaultBackupRoot());
+
+            if (request.Exact)
+            {
+                if (request.Backups is not { Count: > 0 })
+                    return Results.Json(new
+                    {
+                        ok = false,
+                        message = "La sauvegarde exacte de cette application est indisponible. Aucune restauration n'a été tentée.",
+                    });
+
+                // Validate the whole restore plan before writing anything. A
+                // client path must correspond to a backup actually created by
+                // Perfoptimize for one of THIS game's documented config files.
+                var restorePlan = new List<(string ConfigPath, string BackupPath)>();
+                foreach (var requestedBackup in request.Backups.Distinct(PathComparer))
+                {
+                    var configPath = game.ConfigFiles
+                        .Select(file => file.ResolvePath())
+                        .FirstOrDefault(path => backupService.IsKnownBackup(game.Name, path, requestedBackup));
+                    if (configPath is null)
+                    {
+                        return Results.Json(new
+                        {
+                            ok = false,
+                            message = "Une sauvegarde demandée ne correspond pas à ce jeu. Aucune restauration n'a été tentée.",
+                        });
+                    }
+                    if (restorePlan.Any(item => PathComparer.Equals(item.ConfigPath, configPath)))
+                    {
+                        return Results.Json(new
+                        {
+                            ok = false,
+                            message = "Plusieurs sauvegardes ont été fournies pour le même fichier. Aucune restauration n'a été tentée.",
+                        });
+                    }
+                    restorePlan.Add((configPath, requestedBackup));
+                }
+
+                var restored = new List<string>();
+                foreach (var (configPath, backupPath) in restorePlan)
+                {
+                    if (backupService.RestoreExact(game.Name, configPath, backupPath) is null)
+                    {
+                        return Results.Json(new
+                        {
+                            ok = false,
+                            message = "La sauvegarde exacte n'est plus disponible. La restauration a été interrompue.",
+                            restored,
+                        });
+                    }
+                    restored.Add(configPath);
+                }
+
+                return Results.Json(new
+                {
+                    ok = true,
+                    exact = true,
+                    message = $"{restored.Count} fichier(s) restauré(s) depuis les sauvegardes exactes de cette application.",
+                    restored,
+                });
+            }
+
+            // Manual/history restore keeps the previous behavior: restore the
+            // most recent known backup for each documented config file.
+            var latestRestored = new List<string>();
             foreach (var configFile in game.ConfigFiles)
             {
                 var path = configFile.ResolvePath();
-                if (backups.RestoreLatest(game.Name, path) is not null)
-                    restored.Add(path);
+                if (backupService.RestoreLatest(game.Name, path) is not null)
+                    latestRestored.Add(path);
             }
-            return Results.Json(restored.Count > 0
-                ? new { ok = true, message = $"{restored.Count} fichier(s) restauré(s) depuis la dernière sauvegarde." }
-                : new { ok = false, message = "Aucune sauvegarde à restaurer pour ce jeu." });
+            return Results.Json(latestRestored.Count > 0
+                ? new { ok = true, exact = false, message = $"{latestRestored.Count} fichier(s) restauré(s) depuis la dernière sauvegarde." }
+                : new { ok = false, exact = false, message = "Aucune sauvegarde à restaurer pour ce jeu." });
         });
     }
+
+    private static StringComparer PathComparer =>
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 }
 
 /// <summary>Body of a preview/apply request from the UI.</summary>
 internal sealed record ApplyRequest(string? Game, string? Bottleneck, string? Goal, bool Write, long? SessionId = null);
 
 /// <summary>Body of a restore request from the UI.</summary>
-internal sealed record RestoreRequest(string? Game);
+internal sealed record RestoreRequest(string? Game, IReadOnlyList<string>? Backups = null, bool Exact = false);

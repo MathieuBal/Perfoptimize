@@ -11,7 +11,7 @@ public sealed class ApplyResult
     /// only safe rollback target (a later backup could belong to someone else).</summary>
     public IReadOnlyDictionary<string, string> BackupByFile { get; init; } =
         new Dictionary<string, string>();
-    /// <summary>True when files were written (not a dry run).</summary>
+    /// <summary>True only when at least one file was actually written.</summary>
     public bool Written { get; init; }
 }
 
@@ -27,7 +27,17 @@ public sealed class SettingsApplier
     public SettingsApplier(ConfigBackupService backups) => _backups = backups;
 
     /// <param name="write">False plans only (dry run); true backs up then writes.</param>
-    public ApplyResult Apply(GameProfile game, IReadOnlyList<GameSetting> settingsToLower, bool write)
+    /// <param name="requireAllReady">
+    /// When true, writing is all-or-nothing at the planning boundary: if even
+    /// one requested setting is no longer exactly applicable, nothing is
+    /// written. The cockpit uses this for frozen session plans so a stale plan
+    /// can never degrade into a silently partial apply.
+    /// </param>
+    public ApplyResult Apply(
+        GameProfile game,
+        IReadOnlyList<GameSetting> settingsToLower,
+        bool write,
+        bool requireAllReady = false)
     {
         var configTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var configFile in game.ConfigFiles)
@@ -45,6 +55,13 @@ public sealed class SettingsApplier
         if (!write)
             return new ApplyResult { Changes = changes };
 
+        if (requireAllReady && changes.Any(c => c.Status != PlannedChangeStatus.Ready))
+            return new ApplyResult { Changes = changes, Written = false };
+
+        var readyChanges = changes.Where(c => c.Status == PlannedChangeStatus.Ready).ToList();
+        if (readyChanges.Count == 0)
+            return new ApplyResult { Changes = changes, Written = false };
+
         // Each file: back up, then swap the new content in atomically with its
         // original encoding. If any file fails midway, every file already
         // written in this run is rolled back from its fresh backup, so the
@@ -53,8 +70,7 @@ public sealed class SettingsApplier
         var written = new List<(string Path, string BackupPath)>();
         try
         {
-            foreach (var fileGroup in changes
-                         .Where(c => c.Status == PlannedChangeStatus.Ready)
+            foreach (var fileGroup in readyChanges
                          .GroupBy(c => c.FilePath!, StringComparer.OrdinalIgnoreCase))
             {
                 var path = fileGroup.Key;
@@ -80,7 +96,7 @@ public sealed class SettingsApplier
             Changes = changes,
             BackupPaths = backupByFile.Values.ToList(),
             BackupByFile = backupByFile,
-            Written = true,
+            Written = written.Count > 0,
         };
     }
 }
