@@ -21,6 +21,7 @@ public sealed class LiveMonitor
         var before = ReadProcessTimes();
         // When a game is running and PresentMon is available, this short capture
         // measures live FPS during the same window — so change detection sees it.
+        // It is opportunistic: a deliberate analysis/tune capture has priority.
         var fpsTask = sampleFps ? CaptureFpsAsync(gamePid, cancellationToken) : Task.FromResult<FrametimeStatistics?>(null);
         await Task.Delay(window, cancellationToken);
         var after = ReadProcessTimes();
@@ -60,7 +61,9 @@ public sealed class LiveMonitor
         {
             if (PresentMonCapture.FindExecutable() is null)
                 return null;
-            return await PresentMonCapture.CaptureAsync(pid, TimeSpan.FromMilliseconds(1200), cancellationToken);
+            return await PresentMonCapture.CaptureAsync(
+                pid, TimeSpan.FromMilliseconds(1200), cancellationToken,
+                waitForAvailability: false);
         }
         catch
         {
