@@ -6,6 +6,37 @@
   "configFiles": [
     { "path": "%DOCUMENTS%\\My Games\\Path of Exile 2\\poe2_production_Config.ini", "format": "ini" }
   ],
+  "advisories": [
+    {
+      "id": "poe2-upscaling-off-while-gpu-limited",
+      "setting": "Mise à l'échelle (DLSS / FSR / XeSS)",
+      "kind": "poorValue",
+      "conditions": [
+        { "key": "upscale", "operator": "equals", "value": "None" },
+        { "system": "bottleneck", "operator": "equals", "value": "Gpu" },
+        { "system": "targetMet", "operator": "equals", "value": "false" }
+      ],
+      "priorityWhen": [
+        { "system": "bottleneck", "operator": "equals", "value": "Gpu" }
+      ],
+      "recommendation": "Tester un upscaler compatible en mode Qualité (DLSS sur RTX, sinon FSR/XeSS) et re-mesurer dans la même scène",
+      "detail": "Quand le GPU limite réellement les FPS et que l'objectif n'est pas atteint, l'upscaling peut réduire le coût de rendu. Il ne doit pas être activé par principe si la machine tient déjà l'objectif ou si le goulot est ailleurs.",
+      "evidence": "communityValidated",
+      "sources": [
+        {
+          "url": "https://gamers.wiki/en/games/path-of-exile-2/guides/path-of-exile-2-pc-optimization-stable-fps-settings-0-5-5",
+          "note": "Guide 0.5.5 : DLSS sur RTX ou FSR sur AMD, avec comparaison des frame times"
+        },
+        {
+          "url": "https://www.itechguides.com/best-path-of-exile-2-settings-for-performance-and-visibility/",
+          "note": "Guide récent : utiliser l'upscaler quand le GPU est le goulot et comparer sur sa propre machine"
+        }
+      ],
+      "lastVerified": "2026-10-22",
+      "gameVersions": ["0.5.x"],
+      "automaticApplication": false
+    }
+  ],
   "settings": [
     { "name": "Shadow Quality", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },
     { "name": "Global Illumination Quality", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 14 },
