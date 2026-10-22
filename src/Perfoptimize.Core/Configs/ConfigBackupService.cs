@@ -50,6 +50,45 @@ public sealed class ConfigBackupService
     }
 
     /// <summary>
+    /// True only when <paramref name="backupPath"/> is one of the backups that
+    /// this service actually created for this game's config file. Client-supplied
+    /// paths are never trusted on their shape alone.
+    /// </summary>
+    public bool IsKnownBackup(string gameName, string configPath, string backupPath)
+    {
+        if (string.IsNullOrWhiteSpace(backupPath))
+            return false;
+        try
+        {
+            var requested = Path.GetFullPath(backupPath);
+            return ListBackups(gameName, configPath)
+                .Any(candidate => PathsEqual(Path.GetFullPath(candidate), requested));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Restores one specific backup, but only after verifying it belongs to the
+    /// requested game/config pair. Returns the canonical restored backup path,
+    /// or null for an unknown/untrusted path.
+    /// </summary>
+    public string? RestoreExact(string gameName, string configPath, string backupPath)
+    {
+        if (!IsKnownBackup(gameName, configPath, backupPath))
+            return null;
+
+        var requested = Path.GetFullPath(backupPath);
+        var canonical = ListBackups(gameName, configPath)
+            .First(candidate => PathsEqual(Path.GetFullPath(candidate), requested));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(configPath))!);
+        File.Copy(canonical, configPath, overwrite: true);
+        return canonical;
+    }
+
+    /// <summary>
     /// Restores the most recent backup over the config file.
     /// Returns the backup that was restored, or null when none exists.
     /// </summary>
@@ -69,4 +108,8 @@ public sealed class ConfigBackupService
         var safe = string.Concat(gameName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         return Path.Combine(_backupRoot, safe);
     }
+
+    private static bool PathsEqual(string left, string right) =>
+        string.Equals(left, right,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }
