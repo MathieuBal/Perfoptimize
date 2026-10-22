@@ -20,11 +20,20 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore
-        run: dotnet restore Perfoptimize.sln -r win-x64
+      - name: Restore solution for tests
+        run: dotnet restore Perfoptimize.sln
 
       - name: Test
-        run: dotnet test Perfoptimize.sln --configuration Release --verbosity normal
+        run: dotnet test Perfoptimize.sln --configuration Release --no-restore --verbosity normal
+
+      # .NET 8 no longer treats a RuntimeIdentifier as implicitly self-contained.
+      # Restore the app with the same deployment mode used by publish so the
+      # Microsoft.AspNetCore.App Windows runtime pack is present for --no-restore.
+      - name: Restore Windows self-contained app
+        run: >-
+          dotnet restore src/Perfoptimize.App/Perfoptimize.App.csproj
+          --runtime win-x64
+          -p:SelfContained=true
 
       - name: Publish self-contained Windows build
         run: >-
