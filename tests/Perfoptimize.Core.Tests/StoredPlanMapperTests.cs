@@ -5,12 +5,12 @@ using Perfoptimize.Core.Storage;
 
 namespace Perfoptimize.Core.Tests;
 
-public class StoredPlanMapperTests : IDisposable
+public class StoredPlanSnapshotTests : IDisposable
 {
     private readonly string _root =
         Path.Combine(Path.GetTempPath(), $"perfoptimize-plan-{Guid.NewGuid():N}");
 
-    public StoredPlanMapperTests() => Directory.CreateDirectory(_root);
+    public StoredPlanSnapshotTests() => Directory.CreateDirectory(_root);
 
     public void Dispose()
     {
@@ -68,7 +68,7 @@ public class StoredPlanMapperTests : IDisposable
         Assert.Equal("3", stored.ProposedValue);
 
         var exact = Assert.Single(StoredPlanMapper.ToExactSettings([stored]));
-        Assert.Equal(["3", "4"], exact.Config!.Levels);
+        Assert.Equal(new[] { "3", "4" }, exact.Config!.Levels);
     }
 
     [Fact]
