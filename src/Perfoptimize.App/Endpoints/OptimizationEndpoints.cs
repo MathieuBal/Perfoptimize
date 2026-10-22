@@ -92,21 +92,58 @@ internal static class OptimizationEndpoints
                 });
 
             var applier = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
-            var result = applier.Apply(game, settings, request.Write);
+            ApplyResult result;
+            try
+            {
+                // A write from the cockpit is an exact frozen transaction at the
+                // planning boundary: if one config value changed since analysis,
+                // the whole plan is refused instead of applying only a subset.
+                result = applier.Apply(game, settings, request.Write, requireAllReady: request.Write);
+            }
+            catch
+            {
+                return Results.Json(new
+                {
+                    ok = false,
+                    sessionId = session.Id,
+                    game = game.Name,
+                    written = false,
+                    message = request.Write
+                        ? "L'application a échoué. Les fichiers déjà modifiés pendant cette tentative ont été restaurés depuis leurs sauvegardes."
+                        : "Impossible de relire la configuration pour prévisualiser ce plan.",
+                });
+            }
+
+            var changes = result.Changes.Select(c => new
+            {
+                setting = c.Setting.Name,
+                status = c.Status.ToString(),
+                note = c.Note,
+                current = c.CurrentValue,
+                proposed = c.NewValue,
+            }).ToList();
+
+            if (request.Write && !result.Written)
+            {
+                return Results.Json(new
+                {
+                    ok = false,
+                    sessionId = session.Id,
+                    game = game.Name,
+                    written = false,
+                    message = "La configuration a changé depuis l'analyse : aucune modification n'a été appliquée. Relance l'analyse pour obtenir un plan à jour.",
+                    changes,
+                    backups = Array.Empty<string>(),
+                });
+            }
+
             return Results.Json(new
             {
                 ok = true,
                 sessionId = session.Id,
                 game = game.Name,
                 written = result.Written,
-                changes = result.Changes.Select(c => new
-                {
-                    setting = c.Setting.Name,
-                    status = c.Status.ToString(),
-                    note = c.Note,
-                    current = c.CurrentValue,
-                    proposed = c.NewValue,
-                }),
+                changes,
                 backups = result.BackupPaths,
             });
         });
