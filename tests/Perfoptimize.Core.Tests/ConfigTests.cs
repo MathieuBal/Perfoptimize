@@ -169,6 +169,38 @@ public class ConfigBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public void RestoreExact_can_restore_the_backup_from_this_apply_not_the_latest_one()
+    {
+        var service = Service();
+        var first = service.Backup("Game", _configPath); // ShadowQuality=4
+        File.WriteAllText(_configPath, "[Rendering]\nShadowQuality=3");
+        var second = service.Backup("Game", _configPath); // ShadowQuality=3
+        File.WriteAllText(_configPath, "[Rendering]\nShadowQuality=1");
+
+        var restored = service.RestoreExact("Game", _configPath, first);
+
+        Assert.Equal(first, restored);
+        Assert.NotEqual(second, restored);
+        Assert.Equal("[Rendering]\nShadowQuality=4", File.ReadAllText(_configPath));
+    }
+
+    [Fact]
+    public void RestoreExact_rejects_a_path_that_is_not_a_known_backup_for_this_config()
+    {
+        var service = Service();
+        service.Backup("Game", _configPath);
+        File.WriteAllText(_configPath, "[Rendering]\nShadowQuality=1");
+        var untrusted = Path.Combine(_root, "untrusted.bak");
+        File.WriteAllText(untrusted, "[Rendering]\nShadowQuality=999");
+
+        var restored = service.RestoreExact("Game", _configPath, untrusted);
+
+        Assert.Null(restored);
+        Assert.False(service.IsKnownBackup("Game", _configPath, untrusted));
+        Assert.Equal("[Rendering]\nShadowQuality=1", File.ReadAllText(_configPath));
+    }
+
+    [Fact]
     public void RestoreLatest_without_backup_returns_null_and_leaves_file_alone()
     {
         var service = Service();
