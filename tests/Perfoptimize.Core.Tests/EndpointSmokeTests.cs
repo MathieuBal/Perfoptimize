@@ -27,6 +27,7 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     [Theory]
     [InlineData("/")]
     [InlineData("/app.js")]
+    [InlineData("/session-fidelity.js")]
     [InlineData("/styles.css")]
     [InlineData("/api/version")]
     [InlineData("/api/hardware")]
@@ -49,6 +50,22 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var html = await _factory.CreateClient().GetStringAsync("/");
         Assert.Contains("PERFOPTIMIZE", html);
+    }
+
+    [Fact]
+    public async Task Session_fidelity_binding_loads_after_the_main_app_and_sends_the_analysis_id()
+    {
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/");
+        var binding = await client.GetStringAsync("/session-fidelity.js");
+
+        var appIndex = html.IndexOf("/app.js", StringComparison.Ordinal);
+        var bindingIndex = html.IndexOf("/session-fidelity.js", StringComparison.Ordinal);
+        Assert.True(appIndex >= 0 && bindingIndex > appIndex,
+            "session-fidelity.js must load after app.js so it can extend applyContext");
+        Assert.Contains("state.lastReport", binding);
+        Assert.Contains("sessionId", binding);
+        Assert.Contains("baseApplyContext", binding);
     }
 
     [Fact]
