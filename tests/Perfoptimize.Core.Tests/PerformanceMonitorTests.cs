@@ -3,6 +3,15 @@ using Perfoptimize.Core.Monitoring;
 
 namespace Perfoptimize.Core.Tests;
 
+// These tests intentionally make assertions about wall-clock sampling cadence.
+// Running them beside endpoint smoke tests (which boot several app instances and
+// browsers on Windows CI) can starve the scheduler long enough to invalidate the
+// test fixture rather than the monitor. Keep the contract strict, but give this
+// collection exclusive access to the runner while it measures time.
+[CollectionDefinition("Performance monitor timing", DisableParallelization = true)]
+public sealed class PerformanceMonitorTimingCollection;
+
+[Collection("Performance monitor timing")]
 public class PerformanceMonitorTests
 {
     /// <summary>A source whose every probe takes a fixed amount of time.</summary>
