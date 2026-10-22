@@ -30,12 +30,24 @@ public static class StoredPlanMapper
 
             if (boundSettings.Count > 0)
             {
-                var dryRun = new SettingsApplier(
-                        new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()))
-                    .Apply(game, boundSettings, write: false);
+                try
+                {
+                    // Snapshotting is deliberately best-effort. A locked or
+                    // unreadable config must not make the whole monitoring
+                    // analysis fail; it simply means the dashboard cannot
+                    // safely auto-apply that recommendation later.
+                    var dryRun = new SettingsApplier(
+                            new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()))
+                        .Apply(game, boundSettings, write: false);
 
-                foreach (var change in dryRun.Changes.Where(c => c.Status == PlannedChangeStatus.Ready))
-                    plannedBySetting.TryAdd(change.Setting.Name, change);
+                    foreach (var change in dryRun.Changes.Where(c => c.Status == PlannedChangeStatus.Ready))
+                        plannedBySetting.TryAdd(change.Setting.Name, change);
+                }
+                catch
+                {
+                    // No exact writable snapshot. Advice remains displayable,
+                    // and /api/apply will refuse to guess.
+                }
             }
         }
 
