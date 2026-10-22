@@ -12,6 +12,12 @@ public sealed class GameProfile
     public string Name { get; init; } = "Unknown";
     /// <summary>Process executable names, with or without ".exe", case-insensitive.</summary>
     public IReadOnlyList<string> Executables { get; init; } = [];
+    /// <summary>
+    /// Distinctive substring of the executable's full path, used only when
+    /// several profiles share a process name. The longest matching hint wins;
+    /// null means the executable name alone is the normal/default match.
+    /// </summary>
+    public string? PathHint { get; init; }
     public IReadOnlyList<GameSetting> Settings { get; init; } = [];
     /// <summary>Configuration files the assistant may read (and back up).</summary>
     public IReadOnlyList<GameConfigFile> ConfigFiles { get; init; } = [];
