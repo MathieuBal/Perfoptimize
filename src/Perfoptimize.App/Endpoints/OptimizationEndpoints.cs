@@ -114,10 +114,15 @@ internal static class OptimizationEndpoints
 
         app.MapPost("/api/restore", (RestoreRequest request) =>
         {
+            if (string.IsNullOrWhiteSpace(request.Game))
+                return Results.Json(new { ok = false, message = "Aucun jeu à restaurer." });
+
             var profiles = GameProfileRepository.LoadBuiltIn();
             var game = profiles.FirstOrDefault(p =>
-                           p.Name.Contains(request.Game ?? "", StringComparison.OrdinalIgnoreCase)) ??
-                       RunningGameDetector.Match(request.Game ?? "", profiles);
+                           p.Name.Equals(request.Game, StringComparison.OrdinalIgnoreCase)) ??
+                       profiles.FirstOrDefault(p =>
+                           p.Name.Contains(request.Game, StringComparison.OrdinalIgnoreCase)) ??
+                       RunningGameDetector.Match(request.Game, profiles);
             if (game is null)
                 return Results.Json(new { ok = false, message = "Jeu inconnu." });
             if (new RunningGameDetector().Detect([game]) is { } running)
