@@ -62,6 +62,7 @@ public sealed class PresentMonCapture
 
         var gateHeld = false;
         string? outputPath = null;
+        Process? process = null;
         try
         {
             if (waitForAvailability)
@@ -79,7 +80,7 @@ public sealed class PresentMonCapture
             outputPath = Path.Combine(
                 Path.GetTempPath(), $"perfoptimize-presentmon-{Guid.NewGuid():N}.csv");
             var seconds = Math.Max(1, (int)duration.TotalSeconds);
-            using var process = Process.Start(new ProcessStartInfo
+            process = Process.Start(new ProcessStartInfo
             {
                 FileName = executable,
                 Arguments = $"--process_id {gameProcessId} --output_file \"{outputPath}\" " +
@@ -106,6 +107,22 @@ public sealed class PresentMonCapture
         }
         finally
         {
+            // Cancellation must not release the gate while the external
+            // PresentMon process keeps owning the ETW session in the background.
+            if (process is not null)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Best effort: capture already failed and must stay non-fatal.
+                }
+                process.Dispose();
+            }
+
             try
             {
                 if (outputPath is not null && File.Exists(outputPath))
