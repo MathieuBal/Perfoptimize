@@ -1,0 +1,22 @@
+{
+  "name": "Path of Exile 2",
+  "executables": ["PathOfExile.exe", "PathOfExileSteam.exe", "PathOfExile_x64.exe", "PathOfExile_x64Steam.exe"],
+  "pathHint": "Path of Exile 2",
+  "upscalers": ["dlss", "fsr", "xess"],
+  "configFiles": [
+    { "path": "%DOCUMENTS%\\My Games\\Path of Exile 2\\poe2_production_Config.ini", "format": "ini" }
+  ],
+  "settings": [
+    { "name": "Shadow Quality", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 12 },
+    { "name": "Global Illumination Quality", "impact": "gpu", "action": "lower", "evidence": "communityValidated", "qualityLoss": 2, "performanceGain": 4, "estimatedGainPercent": 14 },
+    { "name": "Bloom", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 1, "performanceGain": 2, "estimatedGainPercent": 4 },
+    { "name": "Screen Space Reflections", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 3, "estimatedGainPercent": 8 },
+    { "name": "Water Detail", "impact": "gpu", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 2, "estimatedGainPercent": 5 },
+    {
+      "name": "Texture Quality", "impact": "vram", "action": "lower", "evidence": "estimated", "qualityLoss": 2, "performanceGain": 1, "estimatedGainPercent": 2,
+      "vramGiBByLevel": { "Low": 3, "Medium": 4, "High": 6 }
+    },
+    { "name": "Engine Multithreading", "impact": "cpu", "action": "keepEnabled", "evidence": "communityValidated", "qualityLoss": 0, "performanceGain": 0, "estimatedGainPercent": 0 },
+    { "name": "Renderer (DirectX 11 / 12 / Vulkan)", "impact": "mixed", "action": "testAlternatives", "evidence": "estimated", "qualityLoss": 0, "performanceGain": 0, "estimatedGainPercent": 0 }
+  ]
+}
