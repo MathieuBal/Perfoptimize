@@ -14,3 +14,31 @@ applyContext = function () {
       : null,
   };
 };
+
+// After an actual write, restore the exact backup paths returned by THAT apply
+// operation. A preview/history restore intentionally keeps the older "latest
+// known backup" behavior; an immediate rollback never does.
+doRestore = async function () {
+  state.applyMsg = "";
+  const exact = state.applyPhase === "applied";
+  const backups = exact && state.applyResult && Array.isArray(state.applyResult.backups)
+    ? state.applyResult.backups
+    : [];
+
+  try {
+    const r = await postJson("/api/restore", {
+      game: state.lastReport.game,
+      backups,
+      exact,
+    });
+    if (!r.ok) {
+      state.applyMsg = r.message;
+    } else {
+      state.applyPhase = "restored";
+      state.applyMsg = r.message;
+    }
+  } catch (e) {
+    state.applyMsg = e.message;
+  }
+  render();
+};
