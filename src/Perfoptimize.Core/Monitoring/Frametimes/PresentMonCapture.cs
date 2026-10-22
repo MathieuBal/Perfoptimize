@@ -14,6 +14,12 @@ public sealed class PresentMonCapture
 {
     private static readonly string[] CandidateNames = ["PresentMon", "PresentMon64", "presentmon"];
 
+    // PresentMon captures share an ETW session. Starting the cockpit's short
+    // live capture while a 30s analysis is running can stop/replace that
+    // session (the command uses --stop_existing_session), corrupting the very
+    // benchmark we are trying to trust. Only one in-process capture may own it.
+    private static readonly SemaphoreSlim CaptureGate = new(1, 1);
+
     /// <summary>Locates the PresentMon executable; null when not installed.</summary>
     public static string? FindExecutable()
     {
@@ -41,19 +47,40 @@ public sealed class PresentMonCapture
     /// (elevation refused, process not presenting, ...). Never throws: FPS
     /// capture is an enhancement, not a requirement.
     /// </summary>
+    /// <param name="waitForAvailability">
+    /// True for explicit analyses/tuning: wait for another Perfoptimize capture
+    /// to finish. False for opportunistic live telemetry: skip FPS for this
+    /// sample instead of queueing behind a benchmark.
+    /// </param>
     public static async Task<FrametimeStatistics?> CaptureAsync(
-        int gameProcessId, TimeSpan duration, CancellationToken cancellationToken = default)
+        int gameProcessId, TimeSpan duration, CancellationToken cancellationToken = default,
+        bool waitForAvailability = true)
     {
         var executable = FindExecutable();
         if (executable is null)
             return null;
 
-        var outputPath = Path.Combine(
-            Path.GetTempPath(), $"perfoptimize-presentmon-{Guid.NewGuid():N}.csv");
+        var gateHeld = false;
+        string? outputPath = null;
+        Process? process = null;
         try
         {
+            if (waitForAvailability)
+            {
+                await CaptureGate.WaitAsync(cancellationToken);
+                gateHeld = true;
+            }
+            else
+            {
+                gateHeld = await CaptureGate.WaitAsync(0, cancellationToken);
+                if (!gateHeld)
+                    return null;
+            }
+
+            outputPath = Path.Combine(
+                Path.GetTempPath(), $"perfoptimize-presentmon-{Guid.NewGuid():N}.csv");
             var seconds = Math.Max(1, (int)duration.TotalSeconds);
-            using var process = Process.Start(new ProcessStartInfo
+            process = Process.Start(new ProcessStartInfo
             {
                 FileName = executable,
                 Arguments = $"--process_id {gameProcessId} --output_file \"{outputPath}\" " +
@@ -80,15 +107,34 @@ public sealed class PresentMonCapture
         }
         finally
         {
+            // Cancellation must not release the gate while the external
+            // PresentMon process keeps owning the ETW session in the background.
+            if (process is not null)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Best effort: capture already failed and must stay non-fatal.
+                }
+                process.Dispose();
+            }
+
             try
             {
-                if (File.Exists(outputPath))
+                if (outputPath is not null && File.Exists(outputPath))
                     File.Delete(outputPath);
             }
             catch
             {
                 // A leftover temp file is not worth failing over.
             }
+
+            if (gateHeld)
+                CaptureGate.Release();
         }
     }
 }
