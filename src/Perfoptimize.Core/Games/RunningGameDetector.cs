@@ -30,11 +30,40 @@ public sealed record DetectedGame(
 public sealed class RunningGameDetector
 {
     /// <summary>Pure matching logic, unit-testable without real processes.</summary>
-    public static GameProfile? Match(string processName, IEnumerable<GameProfile> profiles)
+    public static GameProfile? Match(string processName, IEnumerable<GameProfile> profiles) =>
+        Match(processName, executablePath: null, profiles);
+
+    /// <summary>
+    /// Matches by executable name, then uses the full executable path when
+    /// several profiles share that name. This is required for Path of Exile 1
+    /// and 2, whose Windows process names overlap.
+    /// </summary>
+    public static GameProfile? Match(
+        string processName, string? executablePath, IEnumerable<GameProfile> profiles)
     {
         var normalized = NormalizeExecutableName(processName);
-        return profiles.FirstOrDefault(p =>
-            p.Executables.Any(e => NormalizeExecutableName(e).Equals(normalized, StringComparison.OrdinalIgnoreCase)));
+        var matches = profiles
+            .Where(p => p.Executables.Any(e =>
+                NormalizeExecutableName(e).Equals(normalized, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (matches.Count <= 1)
+            return matches.FirstOrDefault();
+
+        if (!string.IsNullOrWhiteSpace(executablePath))
+        {
+            var hinted = matches
+                .Where(p => !string.IsNullOrWhiteSpace(p.PathHint) &&
+                            executablePath.Contains(p.PathHint!, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(p => p.PathHint!.Length)
+                .FirstOrDefault();
+            if (hinted is not null)
+                return hinted;
+        }
+
+        // If path access is denied or no hint matches, prefer the base/default
+        // profile rather than guessing a variant from an ambiguous process name.
+        return matches.FirstOrDefault(p => string.IsNullOrWhiteSpace(p.PathHint)) ?? matches[0];
     }
 
     /// <summary>Scans running processes and returns the first known game found.</summary>
@@ -44,7 +73,7 @@ public sealed class RunningGameDetector
         {
             try
             {
-                if (Match(process.ProcessName, profiles) is { } profile)
+                if (Match(process.ProcessName, TryGetExecutablePath(process), profiles) is { } profile)
                     return new RunningGame(profile, process.Id, process.ProcessName);
             }
             catch (InvalidOperationException)
