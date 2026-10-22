@@ -69,6 +69,17 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public async Task Session_fidelity_binding_uses_exact_backups_after_a_real_apply()
+    {
+        var binding = await _factory.CreateClient().GetStringAsync("/session-fidelity.js");
+
+        Assert.Contains("state.applyPhase === \"applied\"", binding);
+        Assert.Contains("state.applyResult.backups", binding);
+        Assert.Contains("backups,", binding);
+        Assert.Contains("exact,", binding);
+    }
+
+    [Fact]
     public async Task Settings_guide_tailors_the_renderer_to_the_bottleneck()
     {
         var json = await _factory.CreateClient().GetStringAsync("/api/settings-guide?bottleneck=Cpu");
