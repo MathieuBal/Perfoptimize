@@ -28,6 +28,7 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
     [InlineData("/")]
     [InlineData("/app.js")]
     [InlineData("/session-fidelity.js")]
+    [InlineData("/alpha-feedback.js")]
     [InlineData("/styles.css")]
     [InlineData("/api/version")]
     [InlineData("/api/hardware")]
@@ -77,6 +78,28 @@ public class EndpointSmokeTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Contains("state.applyResult.backups", binding);
         Assert.Contains("backups,", binding);
         Assert.Contains("exact,", binding);
+    }
+
+    [Fact]
+    public async Task Alpha_report_binding_loads_last_and_uses_the_exact_session_id()
+    {
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/");
+        var binding = await client.GetStringAsync("/alpha-feedback.js");
+
+        var fidelityIndex = html.IndexOf("/session-fidelity.js", StringComparison.Ordinal);
+        var reportIndex = html.IndexOf("/alpha-feedback.js", StringComparison.Ordinal);
+        Assert.True(fidelityIndex >= 0 && reportIndex > fidelityIndex,
+            "alpha-feedback.js must load after session fidelity is established");
+        Assert.Contains("state.lastReport.sessionId", binding);
+        Assert.Contains("/api/export-report?sessionId=", binding);
+    }
+
+    [Fact]
+    public async Task Alpha_report_refuses_a_missing_session_id()
+    {
+        using var response = await _factory.CreateClient().GetAsync("/api/export-report");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]

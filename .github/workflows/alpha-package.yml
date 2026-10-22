@@ -1,0 +1,129 @@
+name: Alpha Windows package
+
+on:
+  push:
+    branches: ["main", "feature/alpha-distribution"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-win-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore solution for tests
+        run: dotnet restore Perfoptimize.sln
+
+      - name: Test
+        run: dotnet test Perfoptimize.sln --configuration Release --no-restore --verbosity normal
+
+      # .NET 8 no longer treats a RuntimeIdentifier as implicitly self-contained.
+      # Restore the app with the same deployment mode used by publish so the
+      # Microsoft.AspNetCore.App Windows runtime pack is present for --no-restore.
+      - name: Restore Windows self-contained app
+        run: >-
+          dotnet restore src/Perfoptimize.App/Perfoptimize.App.csproj
+          --runtime win-x64
+          -p:SelfContained=true
+
+      - name: Publish self-contained Windows build
+        run: >-
+          dotnet publish src/Perfoptimize.App/Perfoptimize.App.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --no-restore
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output alpha-out
+
+      - name: Add tester notes
+        shell: pwsh
+        run: |
+          @'
+          PERFOPTIMIZE — ALPHA WINDOWS x64
+
+          Version expérimentale destinée aux tests sur de vraies machines.
+
+          1. Décompresse entièrement l'archive.
+          2. Lance Perfoptimize.exe.
+          3. Windows peut afficher un avertissement car cette alpha n'est pas encore signée.
+          4. Une analyse seule ne modifie jamais le PC.
+          5. Toute modification doit être prévisualisée puis confirmée dans l'interface.
+          6. Après une analyse, utilise « Exporter le rapport » pour partager le rapport JSON de test.
+
+          Le rapport exporté ne contient volontairement ni nom d'utilisateur Windows ni chemin absolu de configuration.
+          '@ | Set-Content -Path alpha-out\LISEZ-MOI-ALPHA.txt -Encoding UTF8
+
+      - name: Create archive and checksum
+        shell: pwsh
+        run: |
+          Compress-Archive -Path alpha-out\* -DestinationPath Perfoptimize-alpha-win-x64.zip -Force
+          (Get-FileHash Perfoptimize-alpha-win-x64.zip -Algorithm SHA256).Hash.ToLower() |
+            Set-Content -Path Perfoptimize-alpha-win-x64.sha256 -Encoding ascii
+
+      - name: Upload alpha package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Perfoptimize-alpha-win-x64
+          path: |
+            Perfoptimize-alpha-win-x64.zip
+            Perfoptimize-alpha-win-x64.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Prepare public download page
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path alpha-site -Force | Out-Null
+          Copy-Item Perfoptimize-alpha-win-x64.zip alpha-site\Perfoptimize-alpha-win-x64.zip
+          Copy-Item Perfoptimize-alpha-win-x64.sha256 alpha-site\Perfoptimize-alpha-win-x64.sha256
+          @'
+          <!doctype html>
+          <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Perfoptimize Alpha</title></head>
+          <body style="font-family:system-ui;max-width:720px;margin:48px auto;padding:0 20px;line-height:1.55">
+            <h1>Perfoptimize — Alpha Windows x64</h1>
+            <p>Version expérimentale destinée aux tests sur de vraies machines Windows.</p>
+            <p><strong>L'analyse seule ne modifie jamais le PC.</strong> Toute écriture doit être prévisualisée et confirmée dans l'application.</p>
+            <p><a href="Perfoptimize-alpha-win-x64.zip">Télécharger l'alpha Windows</a> · <a href="Perfoptimize-alpha-win-x64.sha256">SHA-256</a></p>
+            <p>Cette alpha n'est pas encore signée : Windows peut afficher un avertissement SmartScreen.</p>
+          </body></html>
+          '@ | Set-Content -Path alpha-site\index.html -Encoding UTF8
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: alpha-site
+
+  deploy-download:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: package-win-x64
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: perfoptimize-alpha-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy public alpha download
+        id: deployment
+        uses: actions/deploy-pages@v4

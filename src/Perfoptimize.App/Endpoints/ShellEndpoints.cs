@@ -11,6 +11,7 @@ internal static class ShellEndpoints
         app.MapGet("/", () => Results.Content(WebAssets.Read("index.html"), "text/html; charset=utf-8"));
         app.MapGet("/app.js", () => Results.Content(WebAssets.Read("app.js"), "text/javascript; charset=utf-8"));
         app.MapGet("/session-fidelity.js", () => Results.Content(WebAssets.Read("session-fidelity.js"), "text/javascript; charset=utf-8"));
+        app.MapGet("/alpha-feedback.js", () => Results.Content(WebAssets.Read("alpha-feedback.js"), "text/javascript; charset=utf-8"));
         app.MapGet("/styles.css", () => Results.Content(WebAssets.Read("styles.css"), "text/css; charset=utf-8"));
 
         app.MapGet("/api/version", () => Results.Json(new

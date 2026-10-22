@@ -22,6 +22,7 @@ app.MapMonitorEndpoints();        // measure/diagnose + settings guide
 app.MapLiveDiagnosticsEndpoints();// live monitor, network, incidents
 app.MapToolsEndpoints();          // PresentMon status + install
 app.MapOptimizationEndpoints();   // preview / apply / restore config
+app.MapReportEndpoints();         // anonymized alpha support report
 
 // ----- Launch: print the URL and open the browser ----------------------------
 app.Lifetime.ApplicationStarted.Register(() =>
