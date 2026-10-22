@@ -45,24 +45,33 @@ internal static class MonitorEndpoints
                 Hardware = hardware, Summary = summary, Frametimes = frametimes, TargetFps = targetFps,
             });
 
+            // Freeze the concrete plan now, while the values the user just saw
+            // still describe the config. Applying later must replay these exact
+            // edits; it must never reconstruct a new plan from only a bottleneck.
+            var storedPlan = StoredPlanMapper.Snapshot(plan, detected?.Profile);
+            var exactSettings = StoredPlanMapper.ToExactSettings(storedPlan);
+            long? sessionId = null;
             try
             {
                 using var store = new SessionStore(SessionStore.DefaultDatabasePath());
-                store.Save(new SessionRecord
+                sessionId = store.Save(new SessionRecord
                 {
                     StartedAt = DateTimeOffset.Now.AddSeconds(-seconds),
                     GameName = detected?.Name, Bottleneck = analysis.Type, Summary = summary,
                     TargetFps = plan.TargetFps, AverageFps = frametimes?.AverageFps,
                     OnePercentLowFps = frametimes?.OnePercentLowFps,
+                    Plan = storedPlan,
                 });
             }
-            catch { /* history is best-effort */ }
+            catch { /* history is best-effort; without a saved session the dashboard will refuse writes */ }
 
             return Results.Json(new
             {
+                sessionId,
                 game = detected?.Name,
                 gameKnown = detected?.IsKnown ?? false,
-                canApply = detected?.Profile is not null,
+                canApply = sessionId is not null && detected?.Profile is not null && exactSettings.Count > 0 &&
+                           BottleneckTuning.IsTunable(analysis.Type),
                 sampleCount = summary.SampleCount,
                 primeSeconds = Math.Round(report.PrimeDuration.TotalSeconds, 1),
                 cpu = new { avg = summary.AverageCpuUsagePercent, busiestCore = summary.AverageMaxCoreUsagePercent, gameShare = summary.AverageGameCpuUsagePercent },
@@ -79,9 +88,11 @@ internal static class MonitorEndpoints
                 {
                     r.Title, r.Reason, r.ExpectedGainPercent, evidence = r.Evidence.ToString(),
                 }),
-                // Whether any gain is measured on this machine: without frametimes, every
-                // number is theoretical and must be shown as such.
-                gainsAreMeasured = frametimes is not null,
+                // PresentMon here measures the baseline/current performance. It
+                // does NOT measure the gain of recommendations that have not yet
+                // been applied. Only the tune before/after loop may claim that.
+                baselineFpsMeasured = frametimes is not null,
+                gainsAreMeasured = false,
                 notes = plan.Notes,
                 // Community-documented "settings to avoid" for this game (crashes / stutter).
                 advisories = plan.Advisories.Select(a => new
