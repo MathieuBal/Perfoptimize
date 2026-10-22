@@ -1,6 +1,7 @@
 using Perfoptimize.Core.Configs;
 using Perfoptimize.Core.Games;
 using Perfoptimize.Core.Optimization;
+using Perfoptimize.Core.Storage;
 
 namespace Perfoptimize.App.Endpoints;
 
@@ -11,22 +12,17 @@ internal static class OptimizationEndpoints
     {
         app.MapPost("/api/apply", (ApplyRequest request) =>
         {
+            if (string.IsNullOrWhiteSpace(request.Game))
+                return Results.Json(new { ok = false, message = "Aucun jeu n'est associé à cette analyse." });
+
             var profiles = GameProfileRepository.LoadBuiltIn();
             var game = profiles.FirstOrDefault(p =>
-                           p.Name.Contains(request.Game ?? "", StringComparison.OrdinalIgnoreCase)) ??
-                       RunningGameDetector.Match(request.Game ?? "", profiles);
+                           p.Name.Equals(request.Game, StringComparison.OrdinalIgnoreCase)) ??
+                       profiles.FirstOrDefault(p =>
+                           p.Name.Contains(request.Game, StringComparison.OrdinalIgnoreCase)) ??
+                       RunningGameDetector.Match(request.Game, profiles);
             if (game is null)
                 return Results.Json(new { ok = false, message = "Jeu inconnu." });
-
-            if (!Enum.TryParse<BottleneckType>(request.Bottleneck, ignoreCase: true, out var bottleneck))
-                bottleneck = BottleneckType.Gpu;
-            // The same protection as the advisor/CLI: never touch settings for verdicts
-            // a setting change cannot fix.
-            if (!BottleneckTuning.IsTunable(bottleneck))
-                return Results.Json(new { ok = false, message = BottleneckTuning.RefusalReason(bottleneck) });
-
-            var goal = Enum.TryParse<OptimizationGoal>(request.Goal, ignoreCase: true, out var g)
-                ? g : OptimizationGoal.Balanced;
 
             // Writing must never happen while the game can overwrite its config on exit.
             if (request.Write && new RunningGameDetector().Detect([game]) is { } running)
@@ -36,19 +32,64 @@ internal static class OptimizationEndpoints
                     message = $"{game.Name} est en cours d'exécution (pid {running.ProcessId}) — ferme le jeu avant d'appliquer.",
                 });
 
-            var settings = RecommendationEngine
-                .Recommend(new BottleneckAnalysis { Type = bottleneck }, game, goal)
-                // Only auto-lowerable settings may be written — never a KeepEnabled or
-                // TestAlternatives setting, even if it carries a config binding.
-                .Where(r => r.Setting is { Config: not null } s && s.IsAutoLowerable)
-                .Select(r => r.Setting!)
-                .ToList();
+            SessionRecord? session;
+            try
+            {
+                using var store = new SessionStore(SessionStore.DefaultDatabasePath());
+                if (request.SessionId is { } requestedId)
+                {
+                    session = store.GetById(requestedId);
+                    if (session is null)
+                        return Results.Json(new { ok = false, message = $"La session #{requestedId} n'existe plus. Relance une analyse." });
+                }
+                else
+                {
+                    // Current UI compatibility: the analysis page does not yet
+                    // post its session id, so select the newest session for this
+                    // exact game. No plan is ever recomputed as a fallback.
+                    session = store.GetRecent(limit: 1, game.Name).FirstOrDefault();
+                }
+            }
+            catch
+            {
+                return Results.Json(new
+                {
+                    ok = false,
+                    message = "Le plan exact de l'analyse est indisponible. Relance une analyse avant d'appliquer.",
+                });
+            }
+
+            if (session is null)
+                return Results.Json(new
+                {
+                    ok = false,
+                    message = $"Aucune analyse enregistrée pour {game.Name}. Relance une analyse avant d'appliquer.",
+                });
+            if (!string.Equals(session.GameName, game.Name, StringComparison.OrdinalIgnoreCase))
+                return Results.Json(new
+                {
+                    ok = false,
+                    message = $"La session #{session.Id} appartient à {session.GameName ?? "une analyse système"}, pas à {game.Name}.",
+                });
+            if (!BottleneckTuning.IsTunable(session.Bottleneck))
+                return Results.Json(new { ok = false, message = BottleneckTuning.RefusalReason(session.Bottleneck) });
+            if (session.Plan.Count == 0)
+                return Results.Json(new
+                {
+                    ok = false,
+                    message = $"La session #{session.Id} ne contient pas de plan figé. Relance une analyse avant d'appliquer.",
+                });
+
+            // Dashboard writes are stricter than the CLI's legacy compatibility
+            // path: only complete file/key/value snapshots are eligible. A plan
+            // without them is refused instead of guessed from display names.
+            var settings = StoredPlanMapper.ToExactSettings(session.Plan);
             if (settings.Count == 0)
                 return Results.Json(new
                 {
                     ok = false,
-                    message = $"Aucun réglage de {game.Name} lié à un fichier de config pour un goulot {bottleneck} " +
-                              "(ces réglages se changent dans le menu du jeu).",
+                    message = $"Aucune modification exacte et sûre n'a été enregistrée dans la session #{session.Id}. " +
+                              "Les autres recommandations se règlent manuellement dans le jeu.",
                 });
 
             var applier = new SettingsApplier(new ConfigBackupService(ConfigBackupService.DefaultBackupRoot()));
@@ -56,6 +97,7 @@ internal static class OptimizationEndpoints
             return Results.Json(new
             {
                 ok = true,
+                sessionId = session.Id,
                 game = game.Name,
                 written = result.Written,
                 changes = result.Changes.Select(c => new
@@ -101,7 +143,7 @@ internal static class OptimizationEndpoints
 }
 
 /// <summary>Body of a preview/apply request from the UI.</summary>
-internal sealed record ApplyRequest(string? Game, string? Bottleneck, string? Goal, bool Write);
+internal sealed record ApplyRequest(string? Game, string? Bottleneck, string? Goal, bool Write, long? SessionId = null);
 
 /// <summary>Body of a restore request from the UI.</summary>
 internal sealed record RestoreRequest(string? Game);
